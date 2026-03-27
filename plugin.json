@@ -1,0 +1,16 @@
+{
+  "name": "UA_VoiceCCBridge",
+  "author": "UA_Voice",
+  "description": "Voice Captions Bridge",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "bin": "python3",
+  "flags": [],
+  "api": {
+    "version": 2
+  },
+  "python_metadata": {
+    "entrypoint": "main.py",
+    "class": "Plugin"
+  }
+}

@@ -1,0 +1,16 @@
+# Auto detect text files
+* text=auto
+
+# Shell scripts - always LF
+*.sh text eol=lf
+*.py text eol=lf
+*.tsx text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Binary files - no line ending conversion
+*.so binary
+*.onnx binary
+*.traineddata binary
+piper/piper binary
