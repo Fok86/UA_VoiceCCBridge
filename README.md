@@ -69,9 +69,13 @@
 
 ## Підтримати проєкт
 
-Якщо плагін вам корисний, ви можете підтримати розробку:
+Якщо плагін вам корисний і хочете підтримати розробку — буду дуже радий! ☕
 
-<!-- DONATE_LINKS_HERE -->
+**Monobank:** [send.monobank.ua/jar/7oNtZZsgCb](https://send.monobank.ua/jar/7oNtZZsgCb)
+
+💳 Картка: `4874 1000 2613 9066`
+
+![QR донат](https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://send.monobank.ua/jar/7oNtZZsgCb)
 
 ## Ліцензія
 
