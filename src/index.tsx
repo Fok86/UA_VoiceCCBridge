@@ -95,6 +95,15 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [isActive, setIsActive] = useState(localStorage.getItem("ua_voice_worker") === "true");
   const [timerActive, setTimerActive] = useState(false);
   const [zoneExpanded, setZoneExpanded] = useState(false);
+  const [currentGame, setCurrentGame] = useState<{appid: string|null, name: string|null}>({appid: null, name: null});
+  const [focusedBtn, setFocusedBtn] = useState<string|null>(null);
+
+  // Отримуємо поточну гру при відкритті
+  useEffect(() => {
+    serverApi.callPluginMethod("get_current_game", {}).then((res: any) => {
+      if (res.success) setCurrentGame(res.result);
+    });
+  }, []);
 
   // Зона
   const [offsetBottom, setOffsetBottom] = useState(50);
@@ -117,11 +126,14 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [ocrOem, setOcrOem] = useState(3);
   const [typewriterMode, setTypewriterMode] = useState(false);
   const [typewriterThreshold, setTypewriterThreshold] = useState(80);
+  const [ocrSimilarity, setOcrSimilarity] = useState(80);
 
   // TTS
   const [ttsSpeaker, setTtsSpeaker] = useState(1);
-  const [ttsSpeed, setTtsSpeed] = useState(0.8);
+  const [ttsSpeed, setTtsSpeed] = useState(1.0);
   const [ttsVolume, setTtsVolume] = useState(100);
+  const [ttsNoiseScale, setTtsNoiseScale] = useState(67);  // 0.667 * 100
+  const [ttsNoiseW, setTtsNoiseW] = useState(80);          // 0.8 * 100
 
   const DFL = (window as any).DFL;
   const { PanelSection, PanelSectionRow, Button, ToggleField, SliderField } = DFL || {};
@@ -197,8 +209,10 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     if (res.success && res.result.success) {
       const z = res.result.zone;
       setTtsSpeaker(z.tts_speaker ?? 1);
-      setTtsSpeed(z.tts_speed ?? 0.8);
+      setTtsSpeed(z.tts_speed ?? 1.0);
       setTtsVolume(z.tts_volume ?? 100);
+      setTtsNoiseScale(Math.round((z.tts_noise_scale ?? 0.667) * 100));
+      setTtsNoiseW(Math.round((z.tts_noise_w ?? 0.8) * 100));
     }
   };
 
@@ -213,6 +227,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       setOcrOem(z.ocr_oem || 3);
       setTypewriterMode(z.typewriter_mode || false);
       setTypewriterThreshold(z.typewriter_threshold || 80);
+      setOcrSimilarity(z.ocr_similarity ?? 80);
     }
   };
 
@@ -226,11 +241,10 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     await saveZone();
     setTimerActive(true);
     setImgData(null);
-    setErrorMsg("Йде відлік 5с... Закрий меню і відкрий гру!");
+    setErrorMsg(null);
     const res = await serverApi.callPluginMethod("start_capture_timer", {});
     if (res.success && res.result.success) {
       setImgData(res.result.image);
-      setErrorMsg(null);
     } else {
       setErrorMsg(res.result?.error || "Помилка знімку");
     }
@@ -307,7 +321,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           <Button disabled={timerActive} onClick={startTimer}
             style={{ width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" }}>
             <FaCamera style={{ marginRight: "8px" }} />
-            {timerActive ? "Чекаю 5 секунд..." : "Зробити знімок зони (5 сек)"}
+            {timerActive ? "Знімаю..." : "Зробити знімок"}
           </Button>
         </PanelSectionRow>
         <PreviewBox imgData={imgData} errorMsg={errorMsg} />
@@ -405,6 +419,15 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           </Button>
         </PanelSectionRow>
 
+        {/* Знімок */}
+        <PanelSectionRow>
+          <Button disabled={timerActive} onClick={startTimer}
+            style={{ width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" }}>
+            <FaCamera style={{ marginRight: "8px" }} />
+            {timerActive ? "Знімаю..." : "Зробити знімок"}
+          </Button>
+        </PanelSectionRow>
+
         {/* Превью */}
         <PreviewBox imgData={imgData} errorMsg={errorMsg} />
       </PanelSection>
@@ -436,6 +459,22 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           />
         </PanelSectionRow>
 
+        {/* Поріг схожості субтитрів */}
+        <PanelSectionRow>
+          <SliderField
+            label={`Фільтр повторів: ${ocrSimilarity}%`}
+            value={ocrSimilarity}
+            min={50} max={99} step={1}
+            onChange={(v: number) => setOcrSimilarity(v)}
+          />
+          <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
+            {ocrSimilarity <= 60 ? "Читає майже все (багато повторів)" :
+             ocrSimilarity <= 80 ? "Збалансований" :
+             ocrSimilarity <= 90 ? "Фільтрує схожі фрази (дефолт)" :
+             "Строгий (тільки нові фрази)"}
+          </div>
+        </PanelSectionRow>
+
         {/* Ігнорувати слова */}
         <PanelSectionRow>
           <div style={{ width: "100%" }}>
@@ -446,6 +485,12 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               type="text"
               value={ocrIgnoreWords}
               onChange={(e: any) => setOcrIgnoreWords(e.target.value)}
+              onFocus={() => {
+                try { (window as any).SteamClient.Input.SetKeyboardVisible(true); } catch {}
+              }}
+              onBlur={() => {
+                try { (window as any).SteamClient.Input.SetKeyboardVisible(false); } catch {}
+              }}
               placeholder="Геральт, Йеннефер, Цирі..."
               style={{
                 width: "100%", boxSizing: "border-box",
@@ -517,6 +562,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               ignore_words: ocrIgnoreWords,
               psm: ocrPsm,
               oem: ocrOem,
+              similarity: ocrSimilarity,
             });
             await serverApi.callPluginMethod("save_typewriter_settings", {
               enabled: typewriterMode,
@@ -609,6 +655,36 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           />
         </PanelSectionRow>
 
+        {/* Варіативність голосу */}
+        <PanelSectionRow>
+          <SliderField
+            label={`Живість голосу: ${ttsNoiseScale}%`}
+            value={ttsNoiseScale}
+            min={50} max={100} step={1}
+            onChange={(v: number) => setTtsNoiseScale(v)}
+          />
+          <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
+            {ttsNoiseScale <= 65 ? "Монотонний" :
+             ttsNoiseScale <= 75 ? "Природній (дефолт)" :
+             "Емоційний"}
+          </div>
+        </PanelSectionRow>
+
+        {/* Енергія дихання */}
+        <PanelSectionRow>
+          <SliderField
+            label={`Дихання: ${ttsNoiseW}%`}
+            value={ttsNoiseW}
+            min={60} max={100} step={1}
+            onChange={(v: number) => setTtsNoiseW(v)}
+          />
+          <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
+            {ttsNoiseW <= 70 ? "Чіткий" :
+             ttsNoiseW <= 85 ? "Природній (дефолт)" :
+             "М'який"}
+          </div>
+        </PanelSectionRow>
+
         {/* Зберегти */}
         <PanelSectionRow>
           <Button onClick={async () => {
@@ -616,6 +692,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               speaker: ttsSpeaker,
               speed: ttsSpeed,
               volume: ttsVolume,
+              noise_scale: ttsNoiseScale / 100,
+              noise_w: ttsNoiseW / 100,
             });
           }} style={{ width: "100%", backgroundColor: "#27ae60" }}>
             💾 Зберегти
@@ -627,6 +705,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           <Button onClick={async () => {
             await serverApi.callPluginMethod("save_tts_settings", {
               speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
+              noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
             });
             await serverApi.callPluginMethod("test_tts", {
               text: "Привіт! Це тест синтезу мови українською."
@@ -641,8 +720,39 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   }
 
   // ===== ГОЛОВНЕ МЕНЮ =====
+  const btnStyle = (id: string) => ({
+    width: "100%",
+    textAlign: "left" as const,
+    backgroundColor: focusedBtn === id ? "#1a9fff" : "#2a3140",
+    border: `1px solid ${focusedBtn === id ? "#1a9fff" : "#3d4450"}`,
+    borderRadius: "6px",
+    transition: "background 0.1s, border-color 0.1s",
+  });
+
   return (
     <PanelSection title="UA Voice Bridge">
+
+      {/* Поточна гра */}
+      <PanelSectionRow>
+        <div style={{
+          width: "100%", background: "#1a2030",
+          border: "1px solid #333", borderRadius: "6px",
+          padding: "6px 8px", display: "flex", alignItems: "center", gap: "10px"
+        }}>
+          {currentGame.appid ? (
+            <img
+              src={`https://cdn.cloudflare.steamstatic.com/steam/apps/${currentGame.appid}/capsule_184x69.jpg`}
+              style={{ width: "92px", height: "35px", borderRadius: "3px", objectFit: "cover" }}
+            />
+          ) : (
+            <span style={{ fontSize: "24px" }}>🎮</span>
+          )}
+          <div style={{ color: currentGame.name ? "#fff" : "#555", fontSize: "12px", fontWeight: "bold" }}>
+            {currentGame.name || "Гра не запущена"}
+          </div>
+        </div>
+      </PanelSectionRow>
+
       <PanelSectionRow>
         <ToggleField label="Активація воркера" checked={isActive}
           onChange={(v: any) => {
@@ -652,24 +762,52 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           }} />
       </PanelSectionRow>
       <PanelSectionRow>
-        <Button onClick={() => setActiveMenu("image")} style={{ width: "100%", textAlign: "left" }}>
+        <Button onClick={() => setActiveMenu("image")}
+          onFocus={() => setFocusedBtn("image")} onBlur={() => setFocusedBtn(null)}
+          style={btnStyle("image")}>
           <FaCamera style={{ marginRight: "8px" }} /> Зона субтитрів
         </Button>
       </PanelSectionRow>
       <PanelSectionRow>
-        <Button onClick={() => setActiveMenu("filters")} style={{ width: "100%", textAlign: "left" }}>
+        <Button onClick={() => setActiveMenu("filters")}
+          onFocus={() => setFocusedBtn("filters")} onBlur={() => setFocusedBtn(null)}
+          style={btnStyle("filters")}>
           <FaSlidersH style={{ marginRight: "8px" }} /> Фільтри зображення
         </Button>
       </PanelSectionRow>
       <PanelSectionRow>
-        <Button onClick={() => setActiveMenu("ocr")} style={{ width: "100%", textAlign: "left" }}>
+        <Button onClick={() => setActiveMenu("ocr")}
+          onFocus={() => setFocusedBtn("ocr")} onBlur={() => setFocusedBtn(null)}
+          style={btnStyle("ocr")}>
           <FaLanguage style={{ marginRight: "8px" }} /> Налаштування OCR
         </Button>
       </PanelSectionRow>
       <PanelSectionRow>
-        <Button onClick={() => setActiveMenu("tts")} style={{ width: "100%", textAlign: "left" }}>
+        <Button onClick={() => setActiveMenu("tts")}
+          onFocus={() => setFocusedBtn("tts")} onBlur={() => setFocusedBtn(null)}
+          style={btnStyle("tts")}>
           <FaVolumeUp style={{ marginRight: "8px" }} /> Синтез мови
         </Button>
+      </PanelSectionRow>
+
+      {/* Донати */}
+      <PanelSectionRow>
+        <div style={{
+          width: "100%", background: "#1a2030",
+          border: "1px solid #333", borderRadius: "6px",
+          padding: "10px", textAlign: "center"
+        }}>
+          <div style={{ color: "#8b929a", fontSize: "10px", marginBottom: "6px" }}>
+            Якщо плагін корисний — буду радий підтримці ☕
+          </div>
+          <img
+            src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=https://send.monobank.ua/jar/7oNtZZsgCb"
+            style={{ width: "120px", height: "120px", borderRadius: "4px" }}
+          />
+          <div style={{ color: "#555", fontSize: "9px", marginTop: "4px" }}>
+            💳 4874 1000 2613 9066
+          </div>
+        </div>
       </PanelSectionRow>
     </PanelSection>
   );

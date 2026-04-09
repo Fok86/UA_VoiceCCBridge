@@ -178,6 +178,15 @@ var plugin_export = (function () {
         const [isActive, setIsActive] = SP_REACT.useState(localStorage.getItem("ua_voice_worker") === "true");
         const [timerActive, setTimerActive] = SP_REACT.useState(false);
         const [zoneExpanded, setZoneExpanded] = SP_REACT.useState(false);
+        const [currentGame, setCurrentGame] = SP_REACT.useState({ appid: null, name: null });
+        const [focusedBtn, setFocusedBtn] = SP_REACT.useState(null);
+        // Отримуємо поточну гру при відкритті
+        SP_REACT.useEffect(() => {
+            serverApi.callPluginMethod("get_current_game", {}).then((res) => {
+                if (res.success)
+                    setCurrentGame(res.result);
+            });
+        }, []);
         // Зона
         const [offsetBottom, setOffsetBottom] = SP_REACT.useState(50);
         const [zoneWidth, setZoneWidth] = SP_REACT.useState(900);
@@ -197,10 +206,13 @@ var plugin_export = (function () {
         const [ocrOem, setOcrOem] = SP_REACT.useState(3);
         const [typewriterMode, setTypewriterMode] = SP_REACT.useState(false);
         const [typewriterThreshold, setTypewriterThreshold] = SP_REACT.useState(80);
+        const [ocrSimilarity, setOcrSimilarity] = SP_REACT.useState(80);
         // TTS
         const [ttsSpeaker, setTtsSpeaker] = SP_REACT.useState(1);
-        const [ttsSpeed, setTtsSpeed] = SP_REACT.useState(0.8);
+        const [ttsSpeed, setTtsSpeed] = SP_REACT.useState(1.0);
         const [ttsVolume, setTtsVolume] = SP_REACT.useState(100);
+        const [ttsNoiseScale, setTtsNoiseScale] = SP_REACT.useState(67); // 0.667 * 100
+        const [ttsNoiseW, setTtsNoiseW] = SP_REACT.useState(80); // 0.8 * 100
         const DFL = window.DFL;
         const { PanelSection, PanelSectionRow, Button, ToggleField, SliderField } = DFL || {};
         SP_REACT.useEffect(() => {
@@ -277,8 +289,10 @@ var plugin_export = (function () {
             if (res.success && res.result.success) {
                 const z = res.result.zone;
                 setTtsSpeaker(z.tts_speaker ?? 1);
-                setTtsSpeed(z.tts_speed ?? 0.8);
+                setTtsSpeed(z.tts_speed ?? 1.0);
                 setTtsVolume(z.tts_volume ?? 100);
+                setTtsNoiseScale(Math.round((z.tts_noise_scale ?? 0.667) * 100));
+                setTtsNoiseW(Math.round((z.tts_noise_w ?? 0.8) * 100));
             }
         };
         const loadOcrSettings = async () => {
@@ -292,6 +306,7 @@ var plugin_export = (function () {
                 setOcrOem(z.ocr_oem || 3);
                 setTypewriterMode(z.typewriter_mode || false);
                 setTypewriterThreshold(z.typewriter_threshold || 80);
+                setOcrSimilarity(z.ocr_similarity ?? 80);
             }
         };
         const saveZone = async () => {
@@ -303,11 +318,10 @@ var plugin_export = (function () {
             await saveZone();
             setTimerActive(true);
             setImgData(null);
-            setErrorMsg("Йде відлік 5с... Закрий меню і відкрий гру!");
+            setErrorMsg(null);
             const res = await serverApi.callPluginMethod("start_capture_timer", {});
             if (res.success && res.result.success) {
                 setImgData(res.result.image);
-                setErrorMsg(null);
             }
             else {
                 setErrorMsg(res.result?.error || "Помилка знімку");
@@ -367,7 +381,7 @@ var plugin_export = (function () {
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { disabled: timerActive, onClick: startTimer, style: { width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" } },
                         SP_REACT.createElement(FaCamera, { style: { marginRight: "8px" } }),
-                        timerActive ? "Чекаю 5 секунд..." : "Зробити знімок зони (5 сек)")),
+                        timerActive ? "Знімаю..." : "Зробити знімок")),
                 SP_REACT.createElement(PreviewBox, { imgData: imgData, errorMsg: errorMsg })));
         }
         // ===== МЕНЮ ФІЛЬТРІВ =====
@@ -419,6 +433,10 @@ var plugin_export = (function () {
                         } })),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => { await saveFilters(); }, style: { width: "100%", backgroundColor: "#27ae60" } }, "\uD83D\uDCBE \u0417\u0431\u0435\u0440\u0435\u0433\u0442\u0438 \u0444\u0456\u043B\u044C\u0442\u0440\u0438")),
+                SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(Button, { disabled: timerActive, onClick: startTimer, style: { width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" } },
+                        SP_REACT.createElement(FaCamera, { style: { marginRight: "8px" } }),
+                        timerActive ? "Знімаю..." : "Зробити знімок")),
                 SP_REACT.createElement(PreviewBox, { imgData: imgData, errorMsg: errorMsg })));
         }
         if (activeMenu === "ocr") {
@@ -429,9 +447,25 @@ var plugin_export = (function () {
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Мін. символів: ${ocrMinLen}`, value: ocrMinLen, min: 1, max: 20, step: 1, onChange: (v) => setOcrMinLen(v) })),
                 SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(SliderField, { label: `Фільтр повторів: ${ocrSimilarity}%`, value: ocrSimilarity, min: 50, max: 99, step: 1, onChange: (v) => setOcrSimilarity(v) }),
+                    SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ocrSimilarity <= 60 ? "Читає майже все (багато повторів)" :
+                        ocrSimilarity <= 80 ? "Збалансований" :
+                            ocrSimilarity <= 90 ? "Фільтрує схожі фрази (дефолт)" :
+                                "Строгий (тільки нові фрази)")),
+                SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement("div", { style: { width: "100%" } },
                         SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "4px" } }, "\u0406\u0433\u043D\u043E\u0440\u0443\u0432\u0430\u0442\u0438 \u0441\u043B\u043E\u0432\u0430 (\u0447\u0435\u0440\u0435\u0437 \u043A\u043E\u043C\u0443):"),
-                        SP_REACT.createElement("input", { type: "text", value: ocrIgnoreWords, onChange: (e) => setOcrIgnoreWords(e.target.value), placeholder: "\u0413\u0435\u0440\u0430\u043B\u044C\u0442, \u0419\u0435\u043D\u043D\u0435\u0444\u0435\u0440, \u0426\u0438\u0440\u0456...", style: {
+                        SP_REACT.createElement("input", { type: "text", value: ocrIgnoreWords, onChange: (e) => setOcrIgnoreWords(e.target.value), onFocus: () => {
+                                try {
+                                    window.SteamClient.Input.SetKeyboardVisible(true);
+                                }
+                                catch { }
+                            }, onBlur: () => {
+                                try {
+                                    window.SteamClient.Input.SetKeyboardVisible(false);
+                                }
+                                catch { }
+                            }, placeholder: "\u0413\u0435\u0440\u0430\u043B\u044C\u0442, \u0419\u0435\u043D\u043D\u0435\u0444\u0435\u0440, \u0426\u0438\u0440\u0456...", style: {
                                 width: "100%", boxSizing: "border-box",
                                 background: "#2a3140", border: "1px solid #555",
                                 borderRadius: "4px", color: "#fff",
@@ -468,6 +502,7 @@ var plugin_export = (function () {
                                 ignore_words: ocrIgnoreWords,
                                 psm: ocrPsm,
                                 oem: ocrOem,
+                                similarity: ocrSimilarity,
                             });
                             await serverApi.callPluginMethod("save_typewriter_settings", {
                                 enabled: typewriterMode,
@@ -520,17 +555,30 @@ var plugin_export = (function () {
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Гучність: ${ttsVolume}%`, value: ttsVolume, min: 10, max: 100, step: 5, onChange: (v) => setTtsVolume(v) })),
                 SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(SliderField, { label: `Живість голосу: ${ttsNoiseScale}%`, value: ttsNoiseScale, min: 50, max: 100, step: 1, onChange: (v) => setTtsNoiseScale(v) }),
+                    SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ttsNoiseScale <= 65 ? "Монотонний" :
+                        ttsNoiseScale <= 75 ? "Природній (дефолт)" :
+                            "Емоційний")),
+                SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(SliderField, { label: `Дихання: ${ttsNoiseW}%`, value: ttsNoiseW, min: 60, max: 100, step: 1, onChange: (v) => setTtsNoiseW(v) }),
+                    SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ttsNoiseW <= 70 ? "Чіткий" :
+                        ttsNoiseW <= 85 ? "Природній (дефолт)" :
+                            "М'який")),
+                SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => {
                             await serverApi.callPluginMethod("save_tts_settings", {
                                 speaker: ttsSpeaker,
                                 speed: ttsSpeed,
                                 volume: ttsVolume,
+                                noise_scale: ttsNoiseScale / 100,
+                                noise_w: ttsNoiseW / 100,
                             });
                         }, style: { width: "100%", backgroundColor: "#27ae60" } }, "\uD83D\uDCBE \u0417\u0431\u0435\u0440\u0435\u0433\u0442\u0438")),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => {
                             await serverApi.callPluginMethod("save_tts_settings", {
                                 speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
+                                noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
                             });
                             await serverApi.callPluginMethod("test_tts", {
                                 text: "Привіт! Це тест синтезу мови українською."
@@ -538,7 +586,23 @@ var plugin_export = (function () {
                         }, style: { width: "100%", backgroundColor: "#1a9fff" } }, "\uD83D\uDD0A \u0422\u0435\u0441\u0442 \u0433\u043E\u043B\u043E\u0441\u0443"))));
         }
         // ===== ГОЛОВНЕ МЕНЮ =====
+        const btnStyle = (id) => ({
+            width: "100%",
+            textAlign: "left",
+            backgroundColor: focusedBtn === id ? "#1a9fff" : "#2a3140",
+            border: `1px solid ${focusedBtn === id ? "#1a9fff" : "#3d4450"}`,
+            borderRadius: "6px",
+            transition: "background 0.1s, border-color 0.1s",
+        });
         return (SP_REACT.createElement(PanelSection, { title: "UA Voice Bridge" },
+            SP_REACT.createElement(PanelSectionRow, null,
+                SP_REACT.createElement("div", { style: {
+                        width: "100%", background: "#1a2030",
+                        border: "1px solid #333", borderRadius: "6px",
+                        padding: "6px 8px", display: "flex", alignItems: "center", gap: "10px"
+                    } },
+                    currentGame.appid ? (SP_REACT.createElement("img", { src: `https://cdn.cloudflare.steamstatic.com/steam/apps/${currentGame.appid}/capsule_184x69.jpg`, style: { width: "92px", height: "35px", borderRadius: "3px", objectFit: "cover" } })) : (SP_REACT.createElement("span", { style: { fontSize: "24px" } }, "\uD83C\uDFAE")),
+                    SP_REACT.createElement("div", { style: { color: currentGame.name ? "#fff" : "#555", fontSize: "12px", fontWeight: "bold" } }, currentGame.name || "Гра не запущена"))),
             SP_REACT.createElement(PanelSectionRow, null,
                 SP_REACT.createElement(ToggleField, { label: "\u0410\u043A\u0442\u0438\u0432\u0430\u0446\u0456\u044F \u0432\u043E\u0440\u043A\u0435\u0440\u0430", checked: isActive, onChange: (v) => {
                         setIsActive(v);
@@ -546,21 +610,30 @@ var plugin_export = (function () {
                         serverApi.callPluginMethod("toggle_worker", { active: v });
                     } })),
             SP_REACT.createElement(PanelSectionRow, null,
-                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("image"), style: { width: "100%", textAlign: "left" } },
+                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("image"), onFocus: () => setFocusedBtn("image"), onBlur: () => setFocusedBtn(null), style: btnStyle("image") },
                     SP_REACT.createElement(FaCamera, { style: { marginRight: "8px" } }),
                     " \u0417\u043E\u043D\u0430 \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u0456\u0432")),
             SP_REACT.createElement(PanelSectionRow, null,
-                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("filters"), style: { width: "100%", textAlign: "left" } },
+                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("filters"), onFocus: () => setFocusedBtn("filters"), onBlur: () => setFocusedBtn(null), style: btnStyle("filters") },
                     SP_REACT.createElement(FaSlidersH, { style: { marginRight: "8px" } }),
                     " \u0424\u0456\u043B\u044C\u0442\u0440\u0438 \u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u043D\u044F")),
             SP_REACT.createElement(PanelSectionRow, null,
-                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("ocr"), style: { width: "100%", textAlign: "left" } },
+                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("ocr"), onFocus: () => setFocusedBtn("ocr"), onBlur: () => setFocusedBtn(null), style: btnStyle("ocr") },
                     SP_REACT.createElement(FaLanguage, { style: { marginRight: "8px" } }),
                     " \u041D\u0430\u043B\u0430\u0448\u0442\u0443\u0432\u0430\u043D\u043D\u044F OCR")),
             SP_REACT.createElement(PanelSectionRow, null,
-                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("tts"), style: { width: "100%", textAlign: "left" } },
+                SP_REACT.createElement(Button, { onClick: () => setActiveMenu("tts"), onFocus: () => setFocusedBtn("tts"), onBlur: () => setFocusedBtn(null), style: btnStyle("tts") },
                     SP_REACT.createElement(FaVolumeUp, { style: { marginRight: "8px" } }),
-                    " \u0421\u0438\u043D\u0442\u0435\u0437 \u043C\u043E\u0432\u0438"))));
+                    " \u0421\u0438\u043D\u0442\u0435\u0437 \u043C\u043E\u0432\u0438")),
+            SP_REACT.createElement(PanelSectionRow, null,
+                SP_REACT.createElement("div", { style: {
+                        width: "100%", background: "#1a2030",
+                        border: "1px solid #333", borderRadius: "6px",
+                        padding: "10px", textAlign: "center"
+                    } },
+                    SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginBottom: "6px" } }, "\u042F\u043A\u0449\u043E \u043F\u043B\u0430\u0433\u0456\u043D \u043A\u043E\u0440\u0438\u0441\u043D\u0438\u0439 \u2014 \u0431\u0443\u0434\u0443 \u0440\u0430\u0434\u0438\u0439 \u043F\u0456\u0434\u0442\u0440\u0438\u043C\u0446\u0456 \u2615"),
+                    SP_REACT.createElement("img", { src: "https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=https://send.monobank.ua/jar/7oNtZZsgCb", style: { width: "120px", height: "120px", borderRadius: "4px" } }),
+                    SP_REACT.createElement("div", { style: { color: "#555", fontSize: "9px", marginTop: "4px" } }, "\uD83D\uDCB3 4874 1000 2613 9066")))));
     };
     // @ts-ignore
     var index = definePlugin((serverApi) => {
