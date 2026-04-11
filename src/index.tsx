@@ -238,7 +238,20 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   };
 
   const startTimer = async () => {
-    await saveZone();
+    setTimerActive(true);
+    setImgData(null);
+    setErrorMsg(null);
+    const res = await serverApi.callPluginMethod("start_capture_timer", {});
+    if (res.success && res.result.success) {
+      setImgData(res.result.image);
+    } else {
+      setErrorMsg(res.result?.error || "Помилка знімку");
+    }
+    setTimerActive(false);
+  };
+
+  // Тільки знімок без збереження зони (для меню фільтрів)
+  const takeScreenshot = async () => {
     setTimerActive(true);
     setImgData(null);
     setErrorMsg(null);
@@ -259,10 +272,17 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     </PanelSectionRow>
   );
 
+  const globalStyle = `
+    .Panel button:focus, .Panel button:focus-visible {
+      outline: 2px solid #1a9fff !important;
+      background-color: #2a4a6a !important;
+    }
+  `;
+
   // ===== МЕНЮ ЗОНИ =====
   if (activeMenu === "image") {
     return (
-      <PanelSection title="Зона субтитрів">
+      <PanelSection title="Зона субтитрів"><style>{globalStyle}</style>
         <BackButton />
         <PanelSectionRow>
           <Button onClick={() => setZoneExpanded(!zoneExpanded)}
@@ -318,6 +338,13 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         </>)}
 
         <PanelSectionRow>
+          <Button onClick={saveZone}
+            style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
+            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
+          </Button>
+        </PanelSectionRow>
+
+        <PanelSectionRow>
           <Button disabled={timerActive} onClick={startTimer}
             style={{ width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" }}>
             <FaCamera style={{ marginRight: "8px" }} />
@@ -337,7 +364,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     };
 
     return (
-      <PanelSection title="Фільтри зображення">
+      <PanelSection title="Фільтри зображення"><style>{globalStyle}</style>
         <BackButton />
 
         {/* Кольорова маска */}
@@ -414,14 +441,14 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         {/* Кнопка зберегти */}
         <PanelSectionRow>
           <Button onClick={async () => { await saveFilters(); }}
-            style={{ width: "100%", backgroundColor: "#27ae60" }}>
-            💾 Зберегти фільтри
+            style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
+            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
           </Button>
         </PanelSectionRow>
 
         {/* Знімок */}
         <PanelSectionRow>
-          <Button disabled={timerActive} onClick={startTimer}
+          <Button disabled={timerActive} onClick={takeScreenshot}
             style={{ width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" }}>
             <FaCamera style={{ marginRight: "8px" }} />
             {timerActive ? "Знімаю..." : "Зробити знімок"}
@@ -436,7 +463,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
 
   if (activeMenu === "ocr") {
     return (
-      <PanelSection title="Налаштування OCR">
+      <PanelSection title="Налаштування OCR"><style>{globalStyle}</style>
         <BackButton />
 
         {/* Частота сканування */}
@@ -568,8 +595,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               enabled: typewriterMode,
               threshold: typewriterThreshold,
             });
-          }} style={{ width: "100%", backgroundColor: "#27ae60" }}>
-            💾 Зберегти
+          }} style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
+            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
           </Button>
         </PanelSectionRow>
 
@@ -612,7 +639,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
 
   if (activeMenu === "tts") {
     return (
-      <PanelSection title="Синтез мови (TTS)">
+      <PanelSection title="Синтез мови (TTS)"><style>{globalStyle}</style>
         <BackButton />
 
         {/* Вибір спікера */}
@@ -695,8 +722,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               noise_scale: ttsNoiseScale / 100,
               noise_w: ttsNoiseW / 100,
             });
-          }} style={{ width: "100%", backgroundColor: "#27ae60" }}>
-            💾 Зберегти
+          }} style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
+            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
           </Button>
         </PanelSectionRow>
 
@@ -731,6 +758,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
 
   return (
     <PanelSection title="UA Voice Bridge">
+      <style>{globalStyle}</style>
 
       {/* Поточна гра */}
       <PanelSectionRow>

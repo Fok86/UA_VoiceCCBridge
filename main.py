@@ -157,17 +157,21 @@ class Plugin:
 
     async def save_zone(self, offset_bottom: int, width: int, height: int):
         appid, _ = get_running_game()
+        if not appid:
+            return {"success": True}  # гра не запущена — не зберігаємо
         save_config({"offset_bottom": offset_bottom, "width": width, "height": height}, appid)
         return {"success": True}
 
     async def save_filters(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"bw": bw, "contrast": contrast, "brightness": brightness,
                      "color_filter": color_filter, "hardness": hardness}, appid)
         return {"success": True}
 
     async def save_ocr_settings(self, interval: int, min_len: int, ignore_words: str, psm: int = 6, oem: int = 3, similarity: int = 80):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"ocr_interval": interval, "ocr_min_len": min_len,
                      "ocr_ignore_words": ignore_words, "ocr_psm": psm, "ocr_oem": oem,
                      "ocr_similarity": similarity}, appid)
@@ -175,11 +179,13 @@ class Plugin:
 
     async def save_typewriter_settings(self, enabled: bool, threshold: int):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"typewriter_mode": enabled, "typewriter_threshold": threshold}, appid)
         return {"success": True}
 
     async def save_tts_settings(self, speaker: int, speed: float, volume: int, noise_scale: float = 0.667, noise_w: float = 0.8):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"tts_speaker": speaker, "tts_speed": speed, "tts_volume": volume,
                      "tts_noise_scale": noise_scale, "tts_noise_w": noise_w}, appid)
         return {"success": True}
@@ -197,7 +203,8 @@ class Plugin:
         return {"success": False, "error": "Помилка фільтрів"}
 
     async def start_capture_timer(self):
-        cfg = load_config()
+        appid, _ = get_running_game()
+        cfg = load_config(appid)
         crop = calc_crop(cfg)
         cal_script = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "calibration.sh")
         cal_img = "/dev/shm/calibration_raw.png"

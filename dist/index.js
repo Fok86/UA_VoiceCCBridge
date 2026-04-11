@@ -315,7 +315,20 @@ var plugin_export = (function () {
             });
         };
         const startTimer = async () => {
-            await saveZone();
+            setTimerActive(true);
+            setImgData(null);
+            setErrorMsg(null);
+            const res = await serverApi.callPluginMethod("start_capture_timer", {});
+            if (res.success && res.result.success) {
+                setImgData(res.result.image);
+            }
+            else {
+                setErrorMsg(res.result?.error || "Помилка знімку");
+            }
+            setTimerActive(false);
+        };
+        // Тільки знімок без збереження зони (для меню фільтрів)
+        const takeScreenshot = async () => {
             setTimerActive(true);
             setImgData(null);
             setErrorMsg(null);
@@ -332,9 +345,16 @@ var plugin_export = (function () {
             SP_REACT.createElement(Button, { onClick: () => setActiveMenu("main"), style: { width: "100%", backgroundColor: "#3d4450" } },
                 SP_REACT.createElement(FaArrowLeft, { style: { marginRight: "8px" } }),
                 " \u041D\u0430\u0437\u0430\u0434")));
+        const globalStyle = `
+    .Panel button:focus, .Panel button:focus-visible {
+      outline: 2px solid #1a9fff !important;
+      background-color: #2a4a6a !important;
+    }
+  `;
         // ===== МЕНЮ ЗОНИ =====
         if (activeMenu === "image") {
             return (SP_REACT.createElement(PanelSection, { title: "\u0417\u043E\u043D\u0430 \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u0456\u0432" },
+                SP_REACT.createElement("style", null, globalStyle),
                 SP_REACT.createElement(BackButton, null),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: () => setZoneExpanded(!zoneExpanded), style: { width: "100%", backgroundColor: "#2a3140" } },
@@ -379,6 +399,10 @@ var plugin_export = (function () {
                                     "\u00D7",
                                     zoneHeight)))))),
                 SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(Button, { onClick: saveZone, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
+                        "\uD83D\uDCBE ",
+                        currentGame.name ? currentGame.name : "Гра не запущена")),
+                SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { disabled: timerActive, onClick: startTimer, style: { width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" } },
                         SP_REACT.createElement(FaCamera, { style: { marginRight: "8px" } }),
                         timerActive ? "Знімаю..." : "Зробити знімок")),
@@ -391,6 +415,7 @@ var plugin_export = (function () {
                 none: "#3d4450", R: "#c0392b", G: "#27ae60", B: "#2980b9", Y: "#f1c40f", W: "#bdc3c7"
             };
             return (SP_REACT.createElement(PanelSection, { title: "\u0424\u0456\u043B\u044C\u0442\u0440\u0438 \u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u043D\u044F" },
+                SP_REACT.createElement("style", null, globalStyle),
                 SP_REACT.createElement(BackButton, null),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement("div", { style: { width: "100%", boxSizing: "border-box" } },
@@ -432,15 +457,18 @@ var plugin_export = (function () {
                             fetchFilteredPreview(bw, contrast, v, colorFilter, hardness);
                         } })),
                 SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(Button, { onClick: async () => { await saveFilters(); }, style: { width: "100%", backgroundColor: "#27ae60" } }, "\uD83D\uDCBE \u0417\u0431\u0435\u0440\u0435\u0433\u0442\u0438 \u0444\u0456\u043B\u044C\u0442\u0440\u0438")),
+                    SP_REACT.createElement(Button, { onClick: async () => { await saveFilters(); }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
+                        "\uD83D\uDCBE ",
+                        currentGame.name ? currentGame.name : "Гра не запущена")),
                 SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(Button, { disabled: timerActive, onClick: startTimer, style: { width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" } },
+                    SP_REACT.createElement(Button, { disabled: timerActive, onClick: takeScreenshot, style: { width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" } },
                         SP_REACT.createElement(FaCamera, { style: { marginRight: "8px" } }),
                         timerActive ? "Знімаю..." : "Зробити знімок")),
                 SP_REACT.createElement(PreviewBox, { imgData: imgData, errorMsg: errorMsg })));
         }
         if (activeMenu === "ocr") {
             return (SP_REACT.createElement(PanelSection, { title: "\u041D\u0430\u043B\u0430\u0448\u0442\u0443\u0432\u0430\u043D\u043D\u044F OCR" },
+                SP_REACT.createElement("style", null, globalStyle),
                 SP_REACT.createElement(BackButton, null),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Частота: ${ocrInterval}мс`, value: ocrInterval, min: 300, max: 3000, step: 100, onChange: (v) => setOcrInterval(v) })),
@@ -508,7 +536,9 @@ var plugin_export = (function () {
                                 enabled: typewriterMode,
                                 threshold: typewriterThreshold,
                             });
-                        }, style: { width: "100%", backgroundColor: "#27ae60" } }, "\uD83D\uDCBE \u0417\u0431\u0435\u0440\u0435\u0433\u0442\u0438")),
+                        }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
+                        "\uD83D\uDCBE ",
+                        currentGame.name ? currentGame.name : "Гра не запущена")),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => {
                             setOcrTestResult("Розпізнаю...");
@@ -534,6 +564,7 @@ var plugin_export = (function () {
         }
         if (activeMenu === "tts") {
             return (SP_REACT.createElement(PanelSection, { title: "\u0421\u0438\u043D\u0442\u0435\u0437 \u043C\u043E\u0432\u0438 (TTS)" },
+                SP_REACT.createElement("style", null, globalStyle),
                 SP_REACT.createElement(BackButton, null),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement("div", { style: { width: "100%" } },
@@ -573,7 +604,9 @@ var plugin_export = (function () {
                                 noise_scale: ttsNoiseScale / 100,
                                 noise_w: ttsNoiseW / 100,
                             });
-                        }, style: { width: "100%", backgroundColor: "#27ae60" } }, "\uD83D\uDCBE \u0417\u0431\u0435\u0440\u0435\u0433\u0442\u0438")),
+                        }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
+                        "\uD83D\uDCBE ",
+                        currentGame.name ? currentGame.name : "Гра не запущена")),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => {
                             await serverApi.callPluginMethod("save_tts_settings", {
@@ -595,6 +628,7 @@ var plugin_export = (function () {
             transition: "background 0.1s, border-color 0.1s",
         });
         return (SP_REACT.createElement(PanelSection, { title: "UA Voice Bridge" },
+            SP_REACT.createElement("style", null, globalStyle),
             SP_REACT.createElement(PanelSectionRow, null,
                 SP_REACT.createElement("div", { style: {
                         width: "100%", background: "#1a2030",
