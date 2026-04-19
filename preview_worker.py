@@ -10,10 +10,15 @@ import io
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "bin"))
 
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 import numpy as np
 
 def apply_filters(img, cfg):
+    sharpen = int(cfg.get("sharpen", 0))
+    sharpen_radius = float(cfg.get("sharpen_radius", 2.0))
+    if sharpen > 0:
+        img = img.filter(ImageFilter.UnsharpMask(
+            radius=sharpen_radius, percent=sharpen, threshold=3))
     if cfg.get("brightness", 1.0) != 1.0:
         img = ImageEnhance.Brightness(img).enhance(cfg["brightness"])
     if cfg.get("contrast", 1.0) != 1.0:
@@ -30,6 +35,7 @@ def apply_filters(img, cfg):
         elif color == "B": mask = (B - np.maximum(R, G)) > hardness
         elif color == "Y": mask = (np.minimum(R, G) - B) > hardness
         elif color == "W": mask = np.minimum(np.minimum(R, G), B) > (255 - hardness)
+        elif color == "S": mask = (np.abs(R.astype(np.int16) - G) < hardness) & (np.abs(G.astype(np.int16) - B) < hardness) & (R > 100)
         else:              mask = np.ones(R.shape, dtype=bool)
         result = np.zeros_like(arr, dtype=np.uint8)
         result[mask] = 255

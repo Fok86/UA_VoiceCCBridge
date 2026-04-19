@@ -55,6 +55,13 @@ def load_config():
 
 # ── Фільтри зображення ────────────────────────────────────────────────────────
 def apply_filters(img, cfg):
+    # Різкість (до кольорового фільтру)
+    sharpen = int(cfg.get("sharpen", 0))
+    sharpen_radius = float(cfg.get("sharpen_radius", 2.0))
+    if sharpen > 0:
+        from PIL import ImageFilter
+        img = img.filter(ImageFilter.UnsharpMask(
+            radius=sharpen_radius, percent=sharpen, threshold=3))
     if cfg.get("brightness", 1.0) != 1.0:
         img = ImageEnhance.Brightness(img).enhance(cfg["brightness"])
     if cfg.get("contrast", 1.0) != 1.0:
@@ -69,6 +76,7 @@ def apply_filters(img, cfg):
         elif color == "B": mask = (B - np.maximum(R, G)) > hardness
         elif color == "Y": mask = (np.minimum(R, G) - B) > hardness
         elif color == "W": mask = np.minimum(np.minimum(R, G), B) > (255 - hardness)
+        elif color == "S": mask = (np.abs(R.astype(np.int16) - G) < hardness) & (np.abs(G.astype(np.int16) - B) < hardness) & (R > 100)
         else:              mask = np.ones(R.shape, dtype=bool)
         result = np.zeros_like(arr, dtype=np.uint8)
         result[mask] = 255
@@ -76,6 +84,7 @@ def apply_filters(img, cfg):
     elif cfg.get("bw", False):
         img = img.convert("L").convert("RGB")
     return img
+
 
 # ── TTS — постійний Piper процес ─────────────────────────────────────────────
 _piper_proc = None
@@ -180,6 +189,7 @@ def main():
                 old_speed   = cfg.get("tts_speed", 0.8)
                 cfg = load_config()
                 cfg_mtime = mtime
+                last_text = ""  # скидаємо при зміні гри/конфігу
                 ocr_api.SetVariable("tessedit_pageseg_mode", str(cfg.get("ocr_psm", 6)))
                 if (cfg.get("tts_speaker", 1) != old_speaker or
                     cfg.get("tts_speed", 1.0) != old_speed):

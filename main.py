@@ -162,14 +162,15 @@ class Plugin:
         save_config({"offset_bottom": offset_bottom, "width": width, "height": height}, appid)
         return {"success": True}
 
-    async def save_filters(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int):
+    async def save_filters(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int, sharpen: int = 0, sharpen_radius: float = 2.0):
         appid, _ = get_running_game()
         if not appid: return {"success": True}
         save_config({"bw": bw, "contrast": contrast, "brightness": brightness,
-                     "color_filter": color_filter, "hardness": hardness}, appid)
+                     "color_filter": color_filter, "hardness": hardness,
+                     "sharpen": sharpen, "sharpen_radius": sharpen_radius}, appid)
         return {"success": True}
 
-    async def save_ocr_settings(self, interval: int, min_len: int, ignore_words: str, psm: int = 6, oem: int = 3, similarity: int = 80):
+    async def save_ocr_settings(self, interval: int, min_len: int, ignore_words: str, psm: int = 6, oem: int = 1, similarity: int = 80):
         appid, _ = get_running_game()
         if not appid: return {"success": True}
         save_config({"ocr_interval": interval, "ocr_min_len": min_len,
@@ -190,13 +191,14 @@ class Plugin:
                      "tts_noise_scale": noise_scale, "tts_noise_w": noise_w}, appid)
         return {"success": True}
 
-    async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int):
+    async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int, sharpen: int = 0, sharpen_radius: float = 2.0):
         path = "/dev/shm/calibration_raw.png"
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return {"success": False, "error": "Знімок відсутній"}
         tmp_cfg = load_config()
         tmp_cfg.update({"bw": bw, "contrast": contrast, "brightness": brightness,
-                        "color_filter": color_filter, "hardness": hardness})
+                        "color_filter": color_filter, "hardness": hardness,
+                        "sharpen": sharpen, "sharpen_radius": sharpen_radius})
         result = await run_python3("preview_worker.py", path, json.dumps(tmp_cfg))
         if result:
             return {"success": True, "image": result}

@@ -116,6 +116,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [brightness, setBrightness] = useState(10);
   const [colorFilter, setColorFilter] = useState("none");
   const [hardness, setHardness] = useState(30);
+  const [sharpen, setSharpen] = useState(0);
+  const [sharpenRadius, setSharpenRadius] = useState(2);
 
   // OCR
   const [ocrInterval, setOcrInterval] = useState(1000);
@@ -123,7 +125,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [ocrIgnoreWords, setOcrIgnoreWords] = useState("");
   const [ocrTestResult, setOcrTestResult] = useState<string | null>(null);
   const [ocrPsm, setOcrPsm] = useState(6);
-  const [ocrOem, setOcrOem] = useState(3);
+  const [ocrOem, setOcrOem] = useState(1);
   const [typewriterMode, setTypewriterMode] = useState(false);
   const [typewriterThreshold, setTypewriterThreshold] = useState(80);
   const [ocrSimilarity, setOcrSimilarity] = useState(80);
@@ -164,6 +166,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       setBrightness(Math.round((z.brightness || 1.0) * 10));
       setColorFilter(z.color_filter || "none");
       setHardness(z.hardness || 30);
+      setSharpen(z.sharpen || 0);
+      setSharpenRadius(z.sharpen_radius || 2);
     }
   };
 
@@ -180,7 +184,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   // Превью фільтрів з дебounce
   const fetchFilteredPreview = useCallback(async (
     _bw: boolean, _contrast: number, _brightness: number,
-    _colorFilter: string, _hardness: number
+    _colorFilter: string, _hardness: number,
+    _sharpen: number = sharpen, _sharpenRadius: number = sharpenRadius
   ) => {
     const res = await serverApi.callPluginMethod("get_filtered_preview", {
       bw: _bw,
@@ -188,6 +193,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       brightness: _brightness / 10,
       color_filter: _colorFilter,
       hardness: _hardness,
+      sharpen: _sharpen,
+      sharpen_radius: _sharpenRadius,
     });
     if (res.success && res.result.success) {
       setImgData(res.result.image);
@@ -201,6 +208,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     await serverApi.callPluginMethod("save_filters", {
       bw, contrast: contrast / 10, brightness: brightness / 10,
       color_filter: colorFilter, hardness,
+      sharpen, sharpen_radius: sharpenRadius,
     });
   };
 
@@ -224,7 +232,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       setOcrMinLen(z.ocr_min_len || 3);
       setOcrIgnoreWords(z.ocr_ignore_words || "");
       setOcrPsm(z.ocr_psm || 6);
-      setOcrOem(z.ocr_oem || 3);
+      setOcrOem(z.ocr_oem ?? 1);
       setTypewriterMode(z.typewriter_mode || false);
       setTypewriterThreshold(z.typewriter_threshold || 80);
       setOcrSimilarity(z.ocr_similarity ?? 80);
@@ -358,9 +366,9 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
 
   // ===== МЕНЮ ФІЛЬТРІВ =====
   if (activeMenu === "filters") {
-    const colorButtons = ["none", "R", "G", "B", "Y", "W"];
+    const colorButtons = ["none", "R", "G", "B", "Y", "W", "S"];
     const colorStyles: any = {
-      none: "#3d4450", R: "#c0392b", G: "#27ae60", B: "#2980b9", Y: "#f1c40f", W: "#bdc3c7"
+      none: "#3d4450", R: "#c0392b", G: "#27ae60", B: "#2980b9", Y: "#f1c40f", W: "#bdc3c7", S: "#7f8c8d"
     };
 
     return (
@@ -437,6 +445,27 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               fetchFilteredPreview(bw, contrast, v, colorFilter, hardness);
             }} />
         </PanelSectionRow>
+
+        {/* Різкість */}
+        <PanelSectionRow>
+          <SliderField label={`Різкість: ${sharpen}%`} value={sharpen}
+            min={0} max={500} step={10}
+            onChange={(v: number) => {
+              setSharpen(v);
+              fetchFilteredPreview(bw, contrast, brightness, colorFilter, hardness, v, sharpenRadius);
+            }} />
+        </PanelSectionRow>
+
+        {sharpen > 0 && (
+          <PanelSectionRow>
+            <SliderField label={`Радіус різкості: ${sharpenRadius}px`} value={sharpenRadius}
+              min={1} max={30} step={1}
+              onChange={(v: number) => {
+                setSharpenRadius(v);
+                fetchFilteredPreview(bw, contrast, brightness, colorFilter, hardness, sharpen, v);
+              }} />
+          </PanelSectionRow>
+        )}
 
         {/* Кнопка зберегти */}
         <PanelSectionRow>
@@ -579,7 +608,6 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
             </div>
           </div>
         </PanelSectionRow>
-
         {/* Кнопка зберегти */}
         <PanelSectionRow>
           <Button onClick={async () => {

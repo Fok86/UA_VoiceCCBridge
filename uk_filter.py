@@ -47,7 +47,7 @@ def is_weird(word):
     if not any(c in ALL_LETTERS for c in word): return True
     non = [c for c in word if c not in ALL_LETTERS and not c.isdigit()]
     if len(set(non)) >= 3: return True
-    if re.search(r'(.)\1{2,}', word): return True
+    if re.search(r'([а-яА-ЯіІїЇєЄa-zA-Z0-9])\1{2,}', word): return True
     if len(re.findall(r'[а-яА-ЯіІїЇєЄa-zA-Z]\d', word)) >= 3: return True
     vp = ''.join(UA_VOWELS) + 'aeiouAEIOU'
     if re.search(rf'[{re.escape(vp)}]{{4,}}', word): return True
@@ -74,10 +74,27 @@ def ctx_replace(text):
 def filter_text(text, cfg):
     """Очищає OCR текст від артефактів"""
     text = re.sub(r'[|~#@^*<>{}\\]', '', text)
+    # Багато знаків пунктуації підряд → крапка
+    text = re.sub(r'[!?.,]{2,}', '.', text)
+    text = re.sub(r'[!?.,]{2,}', '.', text)  # багато знаків → одна крапка
     text = re.sub(r'^\W+', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     text = ctx_replace(text)
     words = text.split()
+    # Очищаємо хвіст кожного слова від нелітерних символів
+    def clean_word_tail(w):
+        m = re.match(r"([а-яА-ЯіІїЇєЄa-zA-Z']+)(.*)", w)
+        if not m:
+            return w
+        letters = m.group(1)
+        tail = m.group(2)
+        # Залишаємо тільки . , ! ?
+        tail = re.sub(r'[^.,!?]', '', tail)
+        # Багато знаків → крапка
+        if len(tail) > 1:
+            tail = '.'
+        return letters + tail
+    words = [clean_word_tail(w) for w in words]
     good_words = [w for w in words if not is_weird(w)]
 
     if len(words) > 1:
