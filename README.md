@@ -27,6 +27,23 @@
 - 👁️ Превью зображення з фільтрами
 - 🎮 Профілі налаштувань для кожної гри окремо
 
+## Підтримка розробки
+
+Цей проєкт розроблявся з великою любов'ю до українського gaming community. Якщо він приносить вам користь, будемо вдячні за будь-яку підтримку! 
+
+Кошти від донатів йдуть на:
+- 🔧 Розвиток нових фіч і оптимізацію
+- 🐛 Виправлення багів
+- ☕ Кавою для ночей розробки
+
+**Підтримати проєкт:**
+
+🏦 **Monobank:** [send.monobank.ua/jar/7oNtZZsgCb](https://send.monobank.ua/jar/7oNtZZsgCb)
+
+💳 **Картка:** `4874 1000 2613 9066`
+
+![QR донат](https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://send.monobank.ua/jar/7oNtZZsgCb)
+
 ## Вимоги
 
 - Steam Deck з встановленим [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)
@@ -99,16 +116,6 @@
 | TTS | [Piper](https://github.com/rhasspy/piper) + [ukrainian-tts](https://github.com/robinhad/ukrainian-tts) |
 | Знімок | GStreamer + PipeWire |
 | UI | React + Decky Loader SDK |
-
-## Підтримати проєкт
-
-Якщо плагін вам корисний і хочете підтримати розробку — буду дуже радий! ☕
-
-**Monobank:** [send.monobank.ua/jar/7oNtZZsgCb](https://send.monobank.ua/jar/7oNtZZsgCb)
-
-💳 Картка: `4874 1000 2613 9066`
-
-![QR донат](https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://send.monobank.ua/jar/7oNtZZsgCb)
 
 ## Ліцензія
 
