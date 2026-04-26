@@ -10,11 +10,12 @@ import decky_plugin
 CONFIG_DIR  = "/home/deck/.config/ua_voice_plugin"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 PROFILES_DIR = os.path.join(CONFIG_DIR, "profiles")
+CACHE_DIR = os.path.join(CONFIG_DIR, "cache")
+CACHED_IMAGE = os.path.join(CACHE_DIR, "calibration_cached.png")
 SCREEN_W = 1280
 SCREEN_H = 800
 
 def get_running_game():
-    """Повертає (appid, name) поточної запущеної гри або (None, None)"""
     try:
         for pid in os.listdir('/proc'):
             if not pid.isdigit():
@@ -47,7 +48,6 @@ def get_profile_path(appid):
     return os.path.join(PROFILES_DIR, f"{appid}.json") if appid else None
 
 def load_config(appid=None):
-    """Завантажує: глобальний конфіг → профіль гри (override)"""
     defaults = {
         "offset_bottom": 50, "width": 900, "height": 80,
         "bw": False, "contrast": 1.0, "brightness": 1.0,
@@ -60,13 +60,11 @@ def load_config(appid=None):
         "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
         "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
     }
-    # Завантажити глобальний конфіг
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH) as f:
                 defaults = {**defaults, **json.load(f)}
         except: pass
-    # Оверрайдити профілем гри
     if appid:
         profile_path = get_profile_path(appid)
         if profile_path and os.path.exists(profile_path):
@@ -156,8 +154,6 @@ class Plugin:
 
     async def save_zone(self, offset_bottom: int, width: int, height: int):
         appid, _ = get_running_game()
-        if not appid:
-            return {"success": True}
         save_config({"offset_bottom": offset_bottom, "width": width, "height": height}, appid)
         return {"success": True}
 
@@ -165,7 +161,6 @@ class Plugin:
                            outline_filter: bool = False, outline_hmin: int = 0, outline_hmax: int = 255,
                            outline_radius: int = 3, outline_dark: int = 80, ocr_min_xheight: int = 10):
         appid, _ = get_running_game()
-        if not appid: return {"success": True}
         save_config({"bw": bw, "contrast": contrast, "brightness": brightness,
                      "color_filter": color_filter, "hardness": hardness,
                      "outline_filter": outline_filter, "outline_hmin": outline_hmin,
@@ -175,7 +170,6 @@ class Plugin:
 
     async def save_ocr_settings(self, interval: int, min_len: int, ignore_words: str, psm: int = 6, oem: int = 1, similarity: int = 80):
         appid, _ = get_running_game()
-        if not appid: return {"success": True}
         save_config({"ocr_interval": interval, "ocr_min_len": min_len,
                      "ocr_ignore_words": ignore_words, "ocr_psm": psm, "ocr_oem": oem,
                      "ocr_similarity": similarity}, appid)
@@ -183,7 +177,6 @@ class Plugin:
 
     async def save_typewriter_settings(self, enabled: bool, threshold: int):
         appid, _ = get_running_game()
-        if not appid: return {"success": True}
         save_config({"typewriter_mode": enabled, "typewriter_threshold": threshold}, appid)
         return {"success": True}
 
@@ -197,16 +190,26 @@ class Plugin:
     async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int,
                                    outline_filter: bool = False, outline_hmin: int = 0, outline_hmax: int = 255,
                                    outline_radius: int = 3, outline_dark: int = 80):
-        path = "/dev/shm/calibration_raw.png"
-        if not os.path.exists(path) or os.path.getsize(path) == 0:
+        # Спочатку дивимося кешований знімок (стійкий до видалення)
+        if os.path.exists(CACHED_IMAGE) and os.path.getsize(CACHED_IMAGE) > 0:
+            img_path = CACHED_IMAGE
+        # Потім /dev/shm (тимчасовий)
+        elif os.path.exists("/dev/shm/calibration_raw.png") and os.path.getsize("/dev/shm/calibration_raw.png") > 0:
+            img_path = "/dev/shm/calibration_raw.png"
+            # Копіюємо в кеш щоб не втратити
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            import shutil
+            shutil.copy(img_path, CACHED_IMAGE)
+        else:
             return {"success": False, "error": "Знімок відсутній"}
+        
         tmp_cfg = load_config()
         tmp_cfg.update({"bw": bw, "contrast": contrast, "brightness": brightness,
                         "color_filter": color_filter, "hardness": hardness,
                         "outline_filter": outline_filter, "outline_hmin": outline_hmin,
                         "outline_hmax": outline_hmax, "outline_radius": outline_radius,
                         "outline_dark": outline_dark})
-        result = await run_python3("preview_worker.py", path, json.dumps(tmp_cfg))
+        result = await run_python3("preview_worker.py", img_path, json.dumps(tmp_cfg))
         if result:
             return {"success": True, "image": result}
         return {"success": False, "error": "Помилка фільтрів"}
@@ -219,8 +222,7 @@ class Plugin:
         cal_img = "/dev/shm/calibration_raw.png"
         decky_plugin.logger.info(f"UA_LOG: Знімок. Crop: {crop}")
         try:
-            if os.path.exists(cal_img):
-                os.remove(cal_img)
+            # НЕ видаляємо старий снімок - просто перезаписуємо!
             proc = await asyncio.create_subprocess_exec(
                 "sudo", "-u", "deck", "/usr/bin/bash", cal_script,
                 str(crop["top"]), str(crop["bottom"]), str(crop["left"]), str(crop["right"]),
@@ -228,6 +230,10 @@ class Plugin:
             )
             await proc.communicate()
             if os.path.exists(cal_img) and os.path.getsize(cal_img) > 0:
+                # Копіюємо в постійний кеш
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                import shutil
+                shutil.copy(cal_img, CACHED_IMAGE)
                 result = await run_python3("preview_worker.py", cal_img, json.dumps(cfg))
                 if result:
                     return {"success": True, "image": result}
@@ -236,13 +242,22 @@ class Plugin:
             return {"success": False, "error": str(e)}
 
     async def get_cal_img(self):
-        path = "/dev/shm/calibration_raw.png"
-        if os.path.exists(path) and os.path.getsize(path) > 0:
-            appid, _ = get_running_game()
-            cfg = load_config(appid)
-            result = await run_python3("preview_worker.py", path, json.dumps(cfg))
-            if result:
-                return {"success": True, "image": result}
+        # Спочатку кешований, потім тимчасовий
+        if os.path.exists(CACHED_IMAGE) and os.path.getsize(CACHED_IMAGE) > 0:
+            img_path = CACHED_IMAGE
+        elif os.path.exists("/dev/shm/calibration_raw.png") and os.path.getsize("/dev/shm/calibration_raw.png") > 0:
+            img_path = "/dev/shm/calibration_raw.png"
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            import shutil
+            shutil.copy(img_path, CACHED_IMAGE)
+        else:
+            return {"success": False, "error": "Знімок відсутній"}
+        
+        appid, _ = get_running_game()
+        cfg = load_config(appid)
+        result = await run_python3("preview_worker.py", img_path, json.dumps(cfg))
+        if result:
+            return {"success": True, "image": result}
         return {"success": False, "error": "Знімок відсутній"}
 
     async def test_ocr(self):

@@ -2,6 +2,12 @@
 import os, sys, json, time, subprocess, signal, threading
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ANSI кольори (без підкреслювання)
+WHITE = '\033[37m'
+BLUE = '\033[34m'
+RED = '\033[31m'
+RESET = '\033[0m'
 sys.path.insert(0, os.path.join(PLUGIN_DIR, "bin"))
 sys.path.insert(0, PLUGIN_DIR)
 _tess_libs = os.path.join(PLUGIN_DIR, "bin", "tesserocr.libs")
@@ -147,7 +153,7 @@ def start_piper(cfg):
             if "Real-time factor" in line or "Loaded" in line:
                 print(f"[Piper] {line}", flush=True)
     threading.Thread(target=_log_stderr, daemon=True).start()
-    print("Piper запущено", flush=True)
+    print("✅ Piper запущено", flush=True)
 
 def speak(text, cfg):
     global _piper_proc
@@ -158,7 +164,7 @@ def speak(text, cfg):
             _piper_proc.stdin.write((text + "\n").encode("utf-8"))
             _piper_proc.stdin.flush()
         except Exception as e:
-            print(f"Piper write error: {e}", file=sys.stderr)
+            print(f"❌ Piper write error: {e}", file=sys.stderr)
             _piper_proc = None
 
 def take_screenshot(cfg):
@@ -181,22 +187,23 @@ def take_screenshot(cfg):
     return None
 
 def main():
-    print(f"=== ВОРКЕР ЗАПУЩЕНО {time.strftime('%c')} ===", flush=True)
-    if HAS_SCIPY:
-        print("scipy доступна ✅", flush=True)
-    else:
-        print("scipy недоступна, дилатація буде повільною ⚠️", flush=True)
+    print(f"\n{'='*60}", flush=True)
+    print(f"🎬 ВОРКЕР v1.0.4 ЗАПУЩЕНО | {time.strftime('%H:%M:%S')}", flush=True)
+    print(f"{'='*60}", flush=True)
+    print(f"scipy: {'✅ Доступна' if HAS_SCIPY else '⚠️  Недоступна'}", flush=True)
+    print(f"{'='*60}\n", flush=True)
 
     cfg = load_config()
     cfg_mtime = os.path.getmtime(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else 0
 
     t0 = time.monotonic()
     ocr_api = tesserocr.PyTessBaseAPI(lang="ukr", path=TESSDATA, oem=1, psm=cfg.get("ocr_psm", 6))
-    print(f"tesserocr готовий за {(time.monotonic()-t0)*1000:.0f} мс", flush=True)
+    print(f"⏱️  Тесserocr ініціалізація: {(time.monotonic()-t0)*1000:.0f}мс\n", flush=True)
 
     start_piper(cfg)
     last_text = ""
     running = True
+    cycle_count = 0
 
     def stop(sig, frame):
         nonlocal running
@@ -207,40 +214,48 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     while running:
-        t_start = time.monotonic()
+        cycle_count += 1
+        t_cycle_start = time.monotonic()
+
+        # 1. CONFIG CHECK
         try:
             mtime = os.path.getmtime(CONFIG_PATH)
             if mtime != cfg_mtime:
-                old_speaker = cfg.get("tts_speaker", 1)
-                old_speed = cfg.get("tts_speed", 0.8)
                 cfg = load_config()
                 cfg_mtime = mtime
                 last_text = ""
                 ocr_api.SetVariable("tessedit_pageseg_mode", str(cfg.get("ocr_psm", 6)))
-                if (cfg.get("tts_speaker", 1) != old_speaker or cfg.get("tts_speed", 1.0) != old_speed):
-                    if _piper_proc and _piper_proc.poll() is None:
-                        _piper_proc.terminate()
-                    start_piper(cfg)
-                    print("Piper перезапущено", flush=True)
         except: pass
 
         interval = cfg.get("ocr_interval", 1000) / 1000.0
+
+        # 2. SCREENSHOT
+        t_ss = time.monotonic()
         img_path = take_screenshot(cfg)
+        t_ss_ms = (time.monotonic() - t_ss) * 1000
+        print(f"SNAPSHOT: {t_ss_ms:.0f}мс", flush=True)
+        
         if not img_path:
             time.sleep(interval)
             continue
 
+        # 3. OCR
+        t_ocr = time.monotonic()
         try:
-            t_ocr = time.monotonic()
             img = Image.open(img_path)
             img = apply_filters(img, cfg)
             ocr_api.SetImage(img.convert("L"))
             ocr_api.SetVariable("textord_min_xheight", str(int(cfg.get("ocr_min_xheight", 10))))
             raw = ocr_api.GetUTF8Text().strip()
             new_text = filter_text(raw, cfg)
-            print(f"OCR: {new_text} [{(time.monotonic()-t_ocr)*1000:.0f}мс]", flush=True)
+            t_ocr_ms = (time.monotonic() - t_ocr) * 1000
+            
+            if new_text:
+                print(f"{WHITE}OCR: {t_ocr_ms:.0f}мс → \"{new_text}\"{RESET}", flush=True)
+            else:
+                print(f"{WHITE}OCR: {t_ocr_ms:.0f}мс → (пусто){RESET}", flush=True)
         except Exception as e:
-            print(f"OCR error: {e}", file=sys.stderr)
+            print(f"❌ OCR error: {e}", file=sys.stderr)
             time.sleep(interval)
             continue
 
@@ -248,15 +263,33 @@ def main():
             time.sleep(interval)
             continue
 
+        # 4. DECIDE (Фільтр повторів)
+        t_decide = time.monotonic()
         speak_text = decide(last_text, new_text, cfg)
+        t_decide_ms = (time.monotonic() - t_decide) * 1000
+        
+        if not speak_text:
+            # Повтор - червоний OCR текст
+            print(f"{RED}OCR: {t_ocr_ms:.0f}мс → \"{new_text}\"{RESET}", flush=True)
+        
+        # 5. TTS
+        t_tts = time.monotonic()
         if speak_text:
             last_text = new_text
             tts_text = trim_incomplete_word(speak_text)
             if tts_text:
-                print(f"TTS: {tts_text}", flush=True)
                 speak(tts_text, cfg)
+                t_tts_ms = (time.monotonic() - t_tts) * 1000
+                print(f"{BLUE}TTS: {t_tts_ms:.0f}мс → \"{tts_text}\"{RESET}", flush=True)
+            else:
+                pass  # текст обрізаний, нічого не пишемо
+        else:
+            t_tts_ms = 0
 
-        elapsed = time.monotonic() - t_start
+        # TOTAL
+        t_cycle_total = (time.monotonic() - t_cycle_start) * 1000
+
+        elapsed = time.monotonic() - t_cycle_start
         wait = interval - elapsed
         if wait > 0:
             time.sleep(wait)

@@ -232,11 +232,9 @@ var plugin_export = (function () {
             }
             if (activeMenu === "filters") {
                 loadFilters();
-                fetchImg();
             }
             if (activeMenu === "ocr") {
                 loadOcrSettings();
-                fetchImg();
             }
             if (activeMenu === "tts") {
                 loadTtsSettings();
@@ -319,7 +317,6 @@ var plugin_export = (function () {
                 outline_filter: outlineFilter,
                 outline_hmin: outlineHmin, outline_hmax: outlineHmax,
                 outline_radius: outlineRadius, outline_dark: outlineDark,
-                outline_min_area: outlineMinArea,
             });
             if (res.success && res.result.success) {
                 setImgData(res.result.image);
@@ -329,7 +326,7 @@ var plugin_export = (function () {
                 setErrorMsg(res.result?.error || "Помилка");
             }
         }, [serverApi, bw, contrast, brightness, colorFilter, hardness,
-            outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
+            outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark]);
         const saveFilters = async () => {
             await serverApi.callPluginMethod("save_filters", {
                 bw, contrast: contrast / 10, brightness: brightness / 10,
@@ -337,7 +334,6 @@ var plugin_export = (function () {
                 outline_filter: outlineFilter,
                 outline_hmin: outlineHmin, outline_hmax: outlineHmax,
                 outline_radius: outlineRadius, outline_dark: outlineDark,
-                outline_min_area: outlineMinArea,
                 ocr_min_xheight: minXheight,
             });
         };
