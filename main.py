@@ -13,7 +13,6 @@ PROFILES_DIR = os.path.join(CONFIG_DIR, "profiles")
 SCREEN_W = 1280
 SCREEN_H = 800
 
-# ── Профілі ───────────────────────────────────────────────────────────────────
 def get_running_game():
     """Повертає (appid, name) поточної запущеної гри або (None, None)"""
     try:
@@ -48,22 +47,26 @@ def get_profile_path(appid):
     return os.path.join(PROFILES_DIR, f"{appid}.json") if appid else None
 
 def load_config(appid=None):
+    """Завантажує: глобальний конфіг → профіль гри (override)"""
     defaults = {
         "offset_bottom": 50, "width": 900, "height": 80,
         "bw": False, "contrast": 1.0, "brightness": 1.0,
         "color_filter": "none", "hardness": 30,
+        "outline_filter": False, "outline_hmin": 0, "outline_hmax": 255,
+        "outline_radius": 3, "outline_dark": 80,
         "ocr_interval": 1000, "ocr_min_len": 3, "ocr_ignore_words": "",
-        "ocr_psm": 6, "ocr_oem": 1, "ocr_similarity": 80,
+        "ocr_psm": 6, "ocr_oem": 1, "ocr_similarity": 80, "ocr_min_xheight": 10,
         "typewriter_mode": False, "typewriter_threshold": 80,
         "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
+        "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
     }
-    # Спочатку глобальний конфіг
-    try:
-        if os.path.exists(CONFIG_PATH):
+    # Завантажити глобальний конфіг
+    if os.path.exists(CONFIG_PATH):
+        try:
             with open(CONFIG_PATH) as f:
                 defaults = {**defaults, **json.load(f)}
-    except: pass
-    # Потім профіль гри (якщо є)
+        except: pass
+    # Оверрайдити профілем гри
     if appid:
         profile_path = get_profile_path(appid)
         if profile_path and os.path.exists(profile_path):
@@ -88,7 +91,6 @@ def save_config(data: dict, appid=None):
         current.update(data)
         with open(profile_path, "w") as f:
             json.dump(current, f)
-        # Записуємо злитий конфіг для worker.py
         merged = load_config(appid)
         with open(CONFIG_PATH, "w") as f:
             json.dump(merged, f)
@@ -107,7 +109,6 @@ def calc_crop(cfg: dict):
     return {"top": top, "bottom": bottom, "left": left, "right": right}
 
 async def run_python3(script: str, *args) -> str:
-    """Запускає скрипт через системний Python 3.13"""
     plugin_dir = decky_plugin.DECKY_PLUGIN_DIR
     script_path = os.path.join(plugin_dir, script)
     proc = await asyncio.create_subprocess_exec(
@@ -131,13 +132,11 @@ class Plugin:
         return {"success": True, "zone": load_config(appid), "appid": appid}
 
     async def get_profiles(self):
-        """Список збережених профілів"""
         profiles = []
         if os.path.exists(PROFILES_DIR):
             for f in os.listdir(PROFILES_DIR):
                 if f.endswith(".json"):
                     appid = f.replace(".json", "")
-                    # Спробуємо знайти назву гри
                     acf = f"/home/deck/.local/share/Steam/steamapps/appmanifest_{appid}.acf"
                     name = f"Game_{appid}"
                     if os.path.exists(acf):
@@ -158,16 +157,20 @@ class Plugin:
     async def save_zone(self, offset_bottom: int, width: int, height: int):
         appid, _ = get_running_game()
         if not appid:
-            return {"success": True}  # гра не запущена — не зберігаємо
+            return {"success": True}
         save_config({"offset_bottom": offset_bottom, "width": width, "height": height}, appid)
         return {"success": True}
 
-    async def save_filters(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int, sharpen: int = 0, sharpen_radius: float = 2.0):
+    async def save_filters(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int,
+                           outline_filter: bool = False, outline_hmin: int = 0, outline_hmax: int = 255,
+                           outline_radius: int = 3, outline_dark: int = 80, ocr_min_xheight: int = 10):
         appid, _ = get_running_game()
         if not appid: return {"success": True}
         save_config({"bw": bw, "contrast": contrast, "brightness": brightness,
                      "color_filter": color_filter, "hardness": hardness,
-                     "sharpen": sharpen, "sharpen_radius": sharpen_radius}, appid)
+                     "outline_filter": outline_filter, "outline_hmin": outline_hmin,
+                     "outline_hmax": outline_hmax, "outline_radius": outline_radius,
+                     "outline_dark": outline_dark, "ocr_min_xheight": ocr_min_xheight}, appid)
         return {"success": True}
 
     async def save_ocr_settings(self, interval: int, min_len: int, ignore_words: str, psm: int = 6, oem: int = 1, similarity: int = 80):
@@ -191,14 +194,18 @@ class Plugin:
                      "tts_noise_scale": noise_scale, "tts_noise_w": noise_w}, appid)
         return {"success": True}
 
-    async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int, sharpen: int = 0, sharpen_radius: float = 2.0):
+    async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int,
+                                   outline_filter: bool = False, outline_hmin: int = 0, outline_hmax: int = 255,
+                                   outline_radius: int = 3, outline_dark: int = 80):
         path = "/dev/shm/calibration_raw.png"
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return {"success": False, "error": "Знімок відсутній"}
         tmp_cfg = load_config()
         tmp_cfg.update({"bw": bw, "contrast": contrast, "brightness": brightness,
                         "color_filter": color_filter, "hardness": hardness,
-                        "sharpen": sharpen, "sharpen_radius": sharpen_radius})
+                        "outline_filter": outline_filter, "outline_hmin": outline_hmin,
+                        "outline_hmax": outline_hmax, "outline_radius": outline_radius,
+                        "outline_dark": outline_dark})
         result = await run_python3("preview_worker.py", path, json.dumps(tmp_cfg))
         if result:
             return {"success": True, "image": result}
@@ -231,7 +238,8 @@ class Plugin:
     async def get_cal_img(self):
         path = "/dev/shm/calibration_raw.png"
         if os.path.exists(path) and os.path.getsize(path) > 0:
-            cfg = load_config()
+            appid, _ = get_running_game()
+            cfg = load_config(appid)
             result = await run_python3("preview_worker.py", path, json.dumps(cfg))
             if result:
                 return {"success": True, "image": result}
@@ -241,8 +249,9 @@ class Plugin:
         path = "/dev/shm/calibration_raw.png"
         if not os.path.exists(path) or os.path.getsize(path) == 0:
             return {"success": False, "error": "Знімок відсутній"}
-        cfg = load_config()
-        text = await run_python3("ocr_worker.py", path, CONFIG_PATH)
+        appid, _ = get_running_game()
+        cfg = load_config(appid)
+        text = await run_python3("ocr_worker.py", path, json.dumps(cfg))
         preview = await run_python3("preview_worker.py", path, json.dumps(cfg))
         return {
             "success": True,
@@ -288,8 +297,6 @@ class Plugin:
     async def toggle_worker(self, active: bool = False):
         import subprocess
         import signal as sig
-
-        # Вбиваємо старий воркер через /proc
         for proc_dir in os.listdir('/proc'):
             if not proc_dir.isdigit():
                 continue
@@ -300,9 +307,7 @@ class Plugin:
                     os.kill(int(proc_dir), sig.SIGTERM)
             except:
                 pass
-
         await asyncio.sleep(1)
-
         if active:
             script = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "worker.py")
             clean_env = {

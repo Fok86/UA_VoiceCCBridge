@@ -197,13 +197,22 @@ var plugin_export = (function () {
         const [brightness, setBrightness] = SP_REACT.useState(10);
         const [colorFilter, setColorFilter] = SP_REACT.useState("none");
         const [hardness, setHardness] = SP_REACT.useState(30);
+        const [outlineFilter, setOutlineFilter] = SP_REACT.useState(false);
+        const [outlineHmin, setOutlineHmin] = SP_REACT.useState(0);
+        const [outlineHmax, setOutlineHmax] = SP_REACT.useState(255);
+        const [outlineRadius, setOutlineRadius] = SP_REACT.useState(3);
+        const [outlineDark, setOutlineDark] = SP_REACT.useState(80);
+        const [outlineMinArea, setOutlineMinArea] = SP_REACT.useState(20);
+        const [minXheight, setMinXheight] = SP_REACT.useState(10);
+        const [secBasic, setSecBasic] = SP_REACT.useState(true);
+        const [secOutline, setSecOutline] = SP_REACT.useState(false);
         // OCR
         const [ocrInterval, setOcrInterval] = SP_REACT.useState(1000);
         const [ocrMinLen, setOcrMinLen] = SP_REACT.useState(3);
         const [ocrIgnoreWords, setOcrIgnoreWords] = SP_REACT.useState("");
         const [ocrTestResult, setOcrTestResult] = SP_REACT.useState(null);
         const [ocrPsm, setOcrPsm] = SP_REACT.useState(6);
-        const [ocrOem, setOcrOem] = SP_REACT.useState(3);
+        const [ocrOem, setOcrOem] = SP_REACT.useState(1);
         const [typewriterMode, setTypewriterMode] = SP_REACT.useState(false);
         const [typewriterThreshold, setTypewriterThreshold] = SP_REACT.useState(80);
         const [ocrSimilarity, setOcrSimilarity] = SP_REACT.useState(80);
@@ -215,6 +224,7 @@ var plugin_export = (function () {
         const [ttsNoiseW, setTtsNoiseW] = SP_REACT.useState(80); // 0.8 * 100
         const DFL = window.DFL;
         const { PanelSection, PanelSectionRow, Button, ToggleField, SliderField } = DFL || {};
+        // При вході в меню
         SP_REACT.useEffect(() => {
             if (activeMenu === "image") {
                 loadZone();
@@ -226,11 +236,20 @@ var plugin_export = (function () {
             }
             if (activeMenu === "ocr") {
                 loadOcrSettings();
+                fetchImg();
             }
             if (activeMenu === "tts") {
                 loadTtsSettings();
             }
         }, [activeMenu]);
+        // Автооновлення превью при зміні фільтрів з debounce
+        SP_REACT.useEffect(() => {
+            if (activeMenu !== "filters" || imgData === null)
+                return;
+            const timer = setTimeout(() => { fetchFilteredPreview(); }, 300);
+            return () => clearTimeout(timer);
+        }, [bw, contrast, brightness, colorFilter, hardness,
+            outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
         const loadZone = async () => {
             const res = await serverApi.callPluginMethod("get_zone", {});
             if (res.success && res.result.success) {
@@ -244,11 +263,42 @@ var plugin_export = (function () {
             const res = await serverApi.callPluginMethod("get_zone", {});
             if (res.success && res.result.success) {
                 const z = res.result.zone;
-                setBw(z.bw || false);
-                setContrast(Math.round((z.contrast || 1.0) * 10));
-                setBrightness(Math.round((z.brightness || 1.0) * 10));
-                setColorFilter(z.color_filter || "none");
-                setHardness(z.hardness || 30);
+                const bw_ = z.bw || false;
+                const contrast_ = Math.round((z.contrast || 1.0) * 10);
+                const brightness_ = Math.round((z.brightness || 1.0) * 10);
+                const colorFilter_ = z.color_filter || "none";
+                const hardness_ = z.hardness || 30;
+                const outlineFilter_ = z.outline_filter || false;
+                const outlineHmin_ = z.outline_hmin ?? 0;
+                const outlineHmax_ = z.outline_hmax ?? 255;
+                const outlineRadius_ = z.outline_radius ?? 3;
+                const outlineDark_ = z.outline_dark ?? 80;
+                const outlineMinArea_ = z.outline_min_area ?? 0;
+                setBw(bw_);
+                setContrast(contrast_);
+                setBrightness(brightness_);
+                setColorFilter(colorFilter_);
+                setHardness(hardness_);
+                setOutlineFilter(outlineFilter_);
+                setOutlineHmin(outlineHmin_);
+                setOutlineHmax(outlineHmax_);
+                setOutlineRadius(outlineRadius_);
+                setOutlineDark(outlineDark_);
+                setOutlineMinArea(outlineMinArea_);
+                setMinXheight(z.ocr_min_xheight || 10);
+                // Одразу показуємо превью з завантаженими значеннями
+                const prev = await serverApi.callPluginMethod("get_filtered_preview", {
+                    bw: bw_, contrast: contrast_ / 10, brightness: brightness_ / 10,
+                    color_filter: colorFilter_, hardness: hardness_,
+                    outline_filter: outlineFilter_,
+                    outline_hmin: outlineHmin_, outline_hmax: outlineHmax_,
+                    outline_radius: outlineRadius_, outline_dark: outlineDark_,
+                    outline_min_area: outlineMinArea_,
+                });
+                if (prev.success && prev.result.success) {
+                    setImgData(prev.result.image);
+                    setErrorMsg(null);
+                }
             }
         };
         const fetchImg = async () => {
@@ -262,13 +312,14 @@ var plugin_export = (function () {
             }
         };
         // Превью фільтрів з дебounce
-        const fetchFilteredPreview = SP_REACT.useCallback(async (_bw, _contrast, _brightness, _colorFilter, _hardness) => {
+        const fetchFilteredPreview = SP_REACT.useCallback(async () => {
             const res = await serverApi.callPluginMethod("get_filtered_preview", {
-                bw: _bw,
-                contrast: _contrast / 10,
-                brightness: _brightness / 10,
-                color_filter: _colorFilter,
-                hardness: _hardness,
+                bw, contrast: contrast / 10, brightness: brightness / 10,
+                color_filter: colorFilter, hardness,
+                outline_filter: outlineFilter,
+                outline_hmin: outlineHmin, outline_hmax: outlineHmax,
+                outline_radius: outlineRadius, outline_dark: outlineDark,
+                outline_min_area: outlineMinArea,
             });
             if (res.success && res.result.success) {
                 setImgData(res.result.image);
@@ -277,11 +328,17 @@ var plugin_export = (function () {
             else {
                 setErrorMsg(res.result?.error || "Помилка");
             }
-        }, [serverApi]);
+        }, [serverApi, bw, contrast, brightness, colorFilter, hardness,
+            outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
         const saveFilters = async () => {
             await serverApi.callPluginMethod("save_filters", {
                 bw, contrast: contrast / 10, brightness: brightness / 10,
                 color_filter: colorFilter, hardness,
+                outline_filter: outlineFilter,
+                outline_hmin: outlineHmin, outline_hmax: outlineHmax,
+                outline_radius: outlineRadius, outline_dark: outlineDark,
+                outline_min_area: outlineMinArea,
+                ocr_min_xheight: minXheight,
             });
         };
         const loadTtsSettings = async () => {
@@ -303,7 +360,7 @@ var plugin_export = (function () {
                 setOcrMinLen(z.ocr_min_len || 3);
                 setOcrIgnoreWords(z.ocr_ignore_words || "");
                 setOcrPsm(z.ocr_psm || 6);
-                setOcrOem(z.ocr_oem || 3);
+                setOcrOem(z.ocr_oem ?? 1);
                 setTypewriterMode(z.typewriter_mode || false);
                 setTypewriterThreshold(z.typewriter_threshold || 80);
                 setOcrSimilarity(z.ocr_similarity ?? 80);
@@ -349,6 +406,18 @@ var plugin_export = (function () {
     .Panel button:focus, .Panel button:focus-visible {
       outline: 2px solid #1a9fff !important;
       background-color: #2a4a6a !important;
+    }
+    .gamepadSlider_SliderField_LabelText__DicFE,
+    [class*="SliderField_LabelText"],
+    [class*="LabelText"] {
+      font-size: 11px !important;
+    }
+    [class*="SliderField_SliderControlAndNotches"],
+    [class*="SliderControlAndNotches"] {
+      margin-top: 2px !important;
+    }
+    [class*="PanelSectionRow"] {
+      padding: 4px 16px !important;
     }
   `;
         // ===== МЕНЮ ЗОНИ =====
@@ -410,61 +479,61 @@ var plugin_export = (function () {
         }
         // ===== МЕНЮ ФІЛЬТРІВ =====
         if (activeMenu === "filters") {
-            const colorButtons = ["none", "R", "G", "B", "Y", "W"];
+            const colorButtons = ["none", "R", "G", "B", "Y", "W", "S"];
             const colorStyles = {
-                none: "#3d4450", R: "#c0392b", G: "#27ae60", B: "#2980b9", Y: "#f1c40f", W: "#bdc3c7"
+                none: "#3d4450", R: "#c0392b", G: "#27ae60", B: "#2980b9", Y: "#f1c40f", W: "#bdc3c7", S: "#7f8c8d"
             };
+            const SecHeader = ({ title, expanded, onToggle }) => (SP_REACT.createElement(PanelSectionRow, null,
+                SP_REACT.createElement(Button, { onClick: onToggle, style: { width: "100%", backgroundColor: expanded ? "#1a4a6a" : "#2a3140", textAlign: "left" } },
+                    expanded ? "▲" : "▼",
+                    " ",
+                    title)));
             return (SP_REACT.createElement(PanelSection, { title: "\u0424\u0456\u043B\u044C\u0442\u0440\u0438 \u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u043D\u044F" },
                 SP_REACT.createElement("style", null, globalStyle),
                 SP_REACT.createElement(BackButton, null),
                 SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement("div", { style: { width: "100%", boxSizing: "border-box" } },
-                        SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "6px" } }, "\u041A\u043E\u043B\u0456\u0440 \u0442\u0435\u043A\u0441\u0442\u0443 \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u0456\u0432:"),
-                        SP_REACT.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "4px", boxSizing: "border-box" } }, colorButtons.map(c => (SP_REACT.createElement("button", { key: c, onClick: () => {
-                                setColorFilter(c);
-                                fetchFilteredPreview(bw, contrast, brightness, c, hardness);
-                            }, style: {
-                                height: "24px",
-                                borderRadius: "4px",
-                                border: colorFilter === c ? "2px solid #fff" : "2px solid transparent",
-                                backgroundColor: colorStyles[c],
-                                cursor: "pointer",
-                                padding: 0,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                color: "#fff",
-                                fontSize: "12px",
-                            } }, c === "none" ? "✕" : "")))))),
-                colorFilter !== "none" && (SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(SliderField, { label: `Жорсткість: ${hardness}`, value: hardness, min: 5, max: 120, step: 5, onChange: (v) => {
-                            setHardness(v);
-                            fetchFilteredPreview(bw, contrast, brightness, colorFilter, v);
-                        } }))),
-                colorFilter === "none" && (SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(ToggleField, { label: "\u0427\u043E\u0440\u043D\u043E-\u0431\u0456\u043B\u0438\u0439 \u0440\u0435\u0436\u0438\u043C", checked: bw, onChange: (v) => {
-                            setBw(v);
-                            fetchFilteredPreview(v, contrast, brightness, colorFilter, hardness);
-                        } }))),
-                SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(SliderField, { label: `Контраст: ${(contrast / 10).toFixed(1)}x`, value: contrast, min: 1, max: 30, step: 1, onChange: (v) => {
-                            setContrast(v);
-                            fetchFilteredPreview(bw, v, brightness, colorFilter, hardness);
-                        } })),
-                SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(SliderField, { label: `Яскравість: ${(brightness / 10).toFixed(1)}x`, value: brightness, min: 1, max: 30, step: 1, onChange: (v) => {
-                            setBrightness(v);
-                            fetchFilteredPreview(bw, contrast, v, colorFilter, hardness);
-                        } })),
-                SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(Button, { onClick: async () => { await saveFilters(); }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
-                        "\uD83D\uDCBE ",
-                        currentGame.name ? currentGame.name : "Гра не запущена")),
-                SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { disabled: timerActive, onClick: takeScreenshot, style: { width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" } },
                         SP_REACT.createElement(FaCamera, { style: { marginRight: "8px" } }),
                         timerActive ? "Знімаю..." : "Зробити знімок")),
-                SP_REACT.createElement(PreviewBox, { imgData: imgData, errorMsg: errorMsg })));
+                SP_REACT.createElement(PreviewBox, { imgData: imgData, errorMsg: errorMsg }),
+                SP_REACT.createElement(SecHeader, { title: "\u0411\u0430\u0437\u043E\u0432\u0456 \u0444\u0456\u043B\u044C\u0442\u0440\u0438", expanded: secBasic, onToggle: () => setSecBasic(!secBasic) }),
+                secBasic && (SP_REACT.createElement(SP_REACT.Fragment, null,
+                    SP_REACT.createElement(PanelSectionRow, null,
+                        SP_REACT.createElement("div", { style: { width: "100%", boxSizing: "border-box" } },
+                            SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "4px" } }, "\u041A\u043E\u043B\u0456\u0440 \u0442\u0435\u043A\u0441\u0442\u0443 \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u0456\u0432:"),
+                            SP_REACT.createElement("div", { style: { display: "flex", gap: "3px" } }, colorButtons.map(c => (SP_REACT.createElement("button", { key: c, onClick: () => { setColorFilter(c); fetchFilteredPreview(); }, style: {
+                                    flex: 1, height: "26px", borderRadius: "4px",
+                                    border: colorFilter === c ? "2px solid #fff" : "2px solid transparent",
+                                    backgroundColor: colorStyles[c], cursor: "pointer", padding: 0,
+                                    color: "#fff", fontSize: "10px", fontWeight: "bold",
+                                } }, c === "none" ? "✕" : c)))))),
+                    colorFilter !== "none" && (SP_REACT.createElement(PanelSectionRow, null,
+                        SP_REACT.createElement(SliderField, { label: `Жорсткість: ${hardness}`, value: hardness, min: 5, max: 120, step: 5, onChange: (v) => { setHardness(v); fetchFilteredPreview(); } }))),
+                    colorFilter === "none" && (SP_REACT.createElement(PanelSectionRow, null,
+                        SP_REACT.createElement(ToggleField, { label: "\u0427\u043E\u0440\u043D\u043E-\u0431\u0456\u043B\u0438\u0439 \u0440\u0435\u0436\u0438\u043C", checked: bw, onChange: (v) => { setBw(v); fetchFilteredPreview(); } }))),
+                    SP_REACT.createElement(PanelSectionRow, null,
+                        SP_REACT.createElement(SliderField, { label: `Контраст: ${(contrast / 10).toFixed(1)}x`, value: contrast, min: 1, max: 30, step: 1, onChange: (v) => { setContrast(v); fetchFilteredPreview(); } })),
+                    SP_REACT.createElement(PanelSectionRow, null,
+                        SP_REACT.createElement(SliderField, { label: `Яскравість: ${(brightness / 10).toFixed(1)}x`, value: brightness, min: 1, max: 30, step: 1, onChange: (v) => { setBrightness(v); fetchFilteredPreview(); } })),
+                    SP_REACT.createElement(PanelSectionRow, null,
+                        SP_REACT.createElement(SliderField, { label: `Мін висота тексту: ${minXheight}px`, value: minXheight, min: 5, max: 50, step: 1, onChange: (v) => setMinXheight(v) })))),
+                SP_REACT.createElement(SecHeader, { title: "\u041E\u0431\u0432\u043E\u0434\u043A\u0430 (\u043F\u043E\u0448\u0443\u043A \u0431\u0443\u043A\u0432)", expanded: secOutline, onToggle: () => setSecOutline(!secOutline) }),
+                secOutline && (SP_REACT.createElement(SP_REACT.Fragment, null,
+                    SP_REACT.createElement(PanelSectionRow, null,
+                        SP_REACT.createElement(ToggleField, { label: "\u0423\u0432\u0456\u043C\u043A\u043D\u0443\u0442\u0438", checked: outlineFilter, onChange: (v) => { setOutlineFilter(v); fetchFilteredPreview(); } })),
+                    outlineFilter && (SP_REACT.createElement(SP_REACT.Fragment, null,
+                        SP_REACT.createElement(PanelSectionRow, null,
+                            SP_REACT.createElement(SliderField, { label: `Поріг мін: ${outlineHmin}`, value: outlineHmin, min: 0, max: 255, step: 5, onChange: (v) => { setOutlineHmin(v); fetchFilteredPreview(); } })),
+                        SP_REACT.createElement(PanelSectionRow, null,
+                            SP_REACT.createElement(SliderField, { label: `Поріг макс: ${outlineHmax}`, value: outlineHmax, min: 0, max: 255, step: 5, onChange: (v) => { setOutlineHmax(v); fetchFilteredPreview(); } })),
+                        SP_REACT.createElement(PanelSectionRow, null,
+                            SP_REACT.createElement(SliderField, { label: `Радіус обводки: ${outlineRadius}px`, value: outlineRadius, min: 1, max: 15, step: 1, onChange: (v) => { setOutlineRadius(v); fetchFilteredPreview(); } })),
+                        SP_REACT.createElement(PanelSectionRow, null,
+                            SP_REACT.createElement(SliderField, { label: `Поріг темного: ${outlineDark}`, value: outlineDark, min: 0, max: 128, step: 5, onChange: (v) => { setOutlineDark(v); fetchFilteredPreview(); } })))))),
+                SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(Button, { onClick: async () => { await saveFilters(); }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
+                        "\uD83D\uDCBE ",
+                        currentGame.name ? currentGame.name : "Гра не запущена"))));
         }
         if (activeMenu === "ocr") {
             return (SP_REACT.createElement(PanelSection, { title: "\u041D\u0430\u043B\u0430\u0448\u0442\u0443\u0432\u0430\u043D\u043D\u044F OCR" },
@@ -475,11 +544,11 @@ var plugin_export = (function () {
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Мін. символів: ${ocrMinLen}`, value: ocrMinLen, min: 1, max: 20, step: 1, onChange: (v) => setOcrMinLen(v) })),
                 SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(SliderField, { label: `Фільтр повторів: ${ocrSimilarity}%`, value: ocrSimilarity, min: 50, max: 99, step: 1, onChange: (v) => setOcrSimilarity(v) }),
-                    SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ocrSimilarity <= 60 ? "Читає майже все (багато повторів)" :
-                        ocrSimilarity <= 80 ? "Збалансований" :
-                            ocrSimilarity <= 90 ? "Фільтрує схожі фрази (дефолт)" :
-                                "Строгий (тільки нові фрази)")),
+                    SP_REACT.createElement(SliderField, { label: `Фільтр повторів: ${ocrSimilarity}%`, value: ocrSimilarity, min: 20, max: 99, step: 1, onChange: (v) => setOcrSimilarity(v) }),
+                    SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ocrSimilarity <= 40 ? "Дуже агресивний (пропускає різні СС)" :
+                        ocrSimilarity <= 60 ? "Агресивний — менше повторів (рекомендовано)" :
+                            ocrSimilarity <= 80 ? "Збалансований" :
+                                "Слабкий — більше повторів")),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement("div", { style: { width: "100%" } },
                         SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "4px" } }, "\u0406\u0433\u043D\u043E\u0440\u0443\u0432\u0430\u0442\u0438 \u0441\u043B\u043E\u0432\u0430 (\u0447\u0435\u0440\u0435\u0437 \u043A\u043E\u043C\u0443):"),

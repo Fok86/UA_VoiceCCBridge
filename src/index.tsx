@@ -116,8 +116,15 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [brightness, setBrightness] = useState(10);
   const [colorFilter, setColorFilter] = useState("none");
   const [hardness, setHardness] = useState(30);
-  const [sharpen, setSharpen] = useState(0);
-  const [sharpenRadius, setSharpenRadius] = useState(2);
+  const [outlineFilter, setOutlineFilter] = useState(false);
+  const [outlineHmin, setOutlineHmin] = useState(0);
+  const [outlineHmax, setOutlineHmax] = useState(255);
+  const [outlineRadius, setOutlineRadius] = useState(3);
+  const [outlineDark, setOutlineDark] = useState(80);
+  const [outlineMinArea, setOutlineMinArea] = useState(20);
+  const [minXheight, setMinXheight] = useState(10);
+  const [secBasic, setSecBasic] = useState(true);
+  const [secOutline, setSecOutline] = useState(false);
 
   // OCR
   const [ocrInterval, setOcrInterval] = useState(1000);
@@ -140,12 +147,21 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const DFL = (window as any).DFL;
   const { PanelSection, PanelSectionRow, Button, ToggleField, SliderField } = DFL || {};
 
+  // При вході в меню
   useEffect(() => {
     if (activeMenu === "image") { loadZone(); fetchImg(); }
     if (activeMenu === "filters") { loadFilters(); fetchImg(); }
-    if (activeMenu === "ocr") { loadOcrSettings(); }
+    if (activeMenu === "ocr") { loadOcrSettings(); fetchImg(); }
     if (activeMenu === "tts") { loadTtsSettings(); }
   }, [activeMenu]);
+
+  // Автооновлення превью при зміні фільтрів з debounce
+  useEffect(() => {
+    if (activeMenu !== "filters" || imgData === null) return;
+    const timer = setTimeout(() => { fetchFilteredPreview(); }, 300);
+    return () => clearTimeout(timer);
+  }, [bw, contrast, brightness, colorFilter, hardness,
+      outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
 
   const loadZone = async () => {
     const res = await serverApi.callPluginMethod("get_zone", {});
@@ -161,13 +177,36 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     const res = await serverApi.callPluginMethod("get_zone", {});
     if (res.success && res.result.success) {
       const z = res.result.zone;
-      setBw(z.bw || false);
-      setContrast(Math.round((z.contrast || 1.0) * 10));
-      setBrightness(Math.round((z.brightness || 1.0) * 10));
-      setColorFilter(z.color_filter || "none");
-      setHardness(z.hardness || 30);
-      setSharpen(z.sharpen || 0);
-      setSharpenRadius(z.sharpen_radius || 2);
+      const bw_ = z.bw || false;
+      const contrast_ = Math.round((z.contrast || 1.0) * 10);
+      const brightness_ = Math.round((z.brightness || 1.0) * 10);
+      const colorFilter_ = z.color_filter || "none";
+      const hardness_ = z.hardness || 30;
+      const outlineFilter_ = z.outline_filter || false;
+      const outlineHmin_ = z.outline_hmin ?? 0;
+      const outlineHmax_ = z.outline_hmax ?? 255;
+      const outlineRadius_ = z.outline_radius ?? 3;
+      const outlineDark_ = z.outline_dark ?? 80;
+      const outlineMinArea_ = z.outline_min_area ?? 0;
+      setBw(bw_); setContrast(contrast_); setBrightness(brightness_);
+      setColorFilter(colorFilter_); setHardness(hardness_);
+      setOutlineFilter(outlineFilter_);
+      setOutlineHmin(outlineHmin_); setOutlineHmax(outlineHmax_);
+      setOutlineRadius(outlineRadius_); setOutlineDark(outlineDark_);
+      setOutlineMinArea(outlineMinArea_);
+      setMinXheight(z.ocr_min_xheight || 10);
+      // Одразу показуємо превью з завантаженими значеннями
+      const prev = await serverApi.callPluginMethod("get_filtered_preview", {
+        bw: bw_, contrast: contrast_ / 10, brightness: brightness_ / 10,
+        color_filter: colorFilter_, hardness: hardness_,
+        outline_filter: outlineFilter_,
+        outline_hmin: outlineHmin_, outline_hmax: outlineHmax_,
+        outline_radius: outlineRadius_, outline_dark: outlineDark_,
+        outline_min_area: outlineMinArea_,
+      });
+      if (prev.success && prev.result.success) {
+        setImgData(prev.result.image); setErrorMsg(null);
+      }
     }
   };
 
@@ -182,33 +221,32 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   };
 
   // Превью фільтрів з дебounce
-  const fetchFilteredPreview = useCallback(async (
-    _bw: boolean, _contrast: number, _brightness: number,
-    _colorFilter: string, _hardness: number,
-    _sharpen: number = sharpen, _sharpenRadius: number = sharpenRadius
-  ) => {
+  const fetchFilteredPreview = useCallback(async () => {
     const res = await serverApi.callPluginMethod("get_filtered_preview", {
-      bw: _bw,
-      contrast: _contrast / 10,
-      brightness: _brightness / 10,
-      color_filter: _colorFilter,
-      hardness: _hardness,
-      sharpen: _sharpen,
-      sharpen_radius: _sharpenRadius,
+      bw, contrast: contrast / 10, brightness: brightness / 10,
+      color_filter: colorFilter, hardness,
+      outline_filter: outlineFilter,
+      outline_hmin: outlineHmin, outline_hmax: outlineHmax,
+      outline_radius: outlineRadius, outline_dark: outlineDark,
+      outline_min_area: outlineMinArea,
     });
     if (res.success && res.result.success) {
-      setImgData(res.result.image);
-      setErrorMsg(null);
+      setImgData(res.result.image); setErrorMsg(null);
     } else {
       setErrorMsg(res.result?.error || "Помилка");
     }
-  }, [serverApi]);
+  }, [serverApi, bw, contrast, brightness, colorFilter, hardness,
+      outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
 
   const saveFilters = async () => {
     await serverApi.callPluginMethod("save_filters", {
       bw, contrast: contrast / 10, brightness: brightness / 10,
       color_filter: colorFilter, hardness,
-      sharpen, sharpen_radius: sharpenRadius,
+      outline_filter: outlineFilter,
+      outline_hmin: outlineHmin, outline_hmax: outlineHmax,
+      outline_radius: outlineRadius, outline_dark: outlineDark,
+      outline_min_area: outlineMinArea,
+      ocr_min_xheight: minXheight,
     });
   };
 
@@ -284,6 +322,18 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     .Panel button:focus, .Panel button:focus-visible {
       outline: 2px solid #1a9fff !important;
       background-color: #2a4a6a !important;
+    }
+    .gamepadSlider_SliderField_LabelText__DicFE,
+    [class*="SliderField_LabelText"],
+    [class*="LabelText"] {
+      font-size: 11px !important;
+    }
+    [class*="SliderField_SliderControlAndNotches"],
+    [class*="SliderControlAndNotches"] {
+      margin-top: 2px !important;
+    }
+    [class*="PanelSectionRow"] {
+      padding: 4px 16px !important;
     }
   `;
 
@@ -370,112 +420,19 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     const colorStyles: any = {
       none: "#3d4450", R: "#c0392b", G: "#27ae60", B: "#2980b9", Y: "#f1c40f", W: "#bdc3c7", S: "#7f8c8d"
     };
+    const SecHeader = ({title, expanded, onToggle}: any) => (
+      <PanelSectionRow>
+        <Button onClick={onToggle} style={{ width: "100%", backgroundColor: expanded ? "#1a4a6a" : "#2a3140", textAlign: "left" as const }}>
+          {expanded ? "▲" : "▼"} {title}
+        </Button>
+      </PanelSectionRow>
+    );
 
     return (
       <PanelSection title="Фільтри зображення"><style>{globalStyle}</style>
         <BackButton />
 
-        {/* Кольорова маска */}
-        <PanelSectionRow>
-          <div style={{ width: "100%", boxSizing: "border-box" }}>
-            <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "6px" }}>Колір тексту субтитрів:</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "4px", boxSizing: "border-box" }}>
-              {colorButtons.map(c => (
-                <button key={c} onClick={() => {
-                  setColorFilter(c);
-                  fetchFilteredPreview(bw, contrast, brightness, c, hardness);
-                }} style={{
-                  height: "24px",
-                  borderRadius: "4px",
-                  border: colorFilter === c ? "2px solid #fff" : "2px solid transparent",
-                  backgroundColor: colorStyles[c],
-                  cursor: "pointer",
-                  padding: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#fff",
-                  fontSize: "12px",
-                }}>
-                  {c === "none" ? "✕" : ""}
-                </button>
-              ))}
-            </div>
-          </div>
-        </PanelSectionRow>
-
-        {/* Жорсткість маски (тільки якщо обрано колір) */}
-        {colorFilter !== "none" && (
-          <PanelSectionRow>
-            <SliderField label={`Жорсткість: ${hardness}`} value={hardness}
-              min={5} max={120} step={5}
-              onChange={(v: number) => {
-                setHardness(v);
-                fetchFilteredPreview(bw, contrast, brightness, colorFilter, v);
-              }} />
-          </PanelSectionRow>
-        )}
-
-        {/* ЧБ (тільки якщо немає кольорової маски) */}
-        {colorFilter === "none" && (
-          <PanelSectionRow>
-            <ToggleField label="Чорно-білий режим" checked={bw} onChange={(v: boolean) => {
-              setBw(v);
-              fetchFilteredPreview(v, contrast, brightness, colorFilter, hardness);
-            }} />
-          </PanelSectionRow>
-        )}
-
-        {/* Контраст */}
-        <PanelSectionRow>
-          <SliderField label={`Контраст: ${(contrast / 10).toFixed(1)}x`} value={contrast}
-            min={1} max={30} step={1}
-            onChange={(v: number) => {
-              setContrast(v);
-              fetchFilteredPreview(bw, v, brightness, colorFilter, hardness);
-            }} />
-        </PanelSectionRow>
-
-        {/* Яскравість */}
-        <PanelSectionRow>
-          <SliderField label={`Яскравість: ${(brightness / 10).toFixed(1)}x`} value={brightness}
-            min={1} max={30} step={1}
-            onChange={(v: number) => {
-              setBrightness(v);
-              fetchFilteredPreview(bw, contrast, v, colorFilter, hardness);
-            }} />
-        </PanelSectionRow>
-
-        {/* Різкість */}
-        <PanelSectionRow>
-          <SliderField label={`Різкість: ${sharpen}%`} value={sharpen}
-            min={0} max={500} step={10}
-            onChange={(v: number) => {
-              setSharpen(v);
-              fetchFilteredPreview(bw, contrast, brightness, colorFilter, hardness, v, sharpenRadius);
-            }} />
-        </PanelSectionRow>
-
-        {sharpen > 0 && (
-          <PanelSectionRow>
-            <SliderField label={`Радіус різкості: ${sharpenRadius}px`} value={sharpenRadius}
-              min={1} max={30} step={1}
-              onChange={(v: number) => {
-                setSharpenRadius(v);
-                fetchFilteredPreview(bw, contrast, brightness, colorFilter, hardness, sharpen, v);
-              }} />
-          </PanelSectionRow>
-        )}
-
-        {/* Кнопка зберегти */}
-        <PanelSectionRow>
-          <Button onClick={async () => { await saveFilters(); }}
-            style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
-            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
-          </Button>
-        </PanelSectionRow>
-
-        {/* Знімок */}
+        {/* Превью зверху завжди видно */}
         <PanelSectionRow>
           <Button disabled={timerActive} onClick={takeScreenshot}
             style={{ width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" }}>
@@ -483,9 +440,92 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
             {timerActive ? "Знімаю..." : "Зробити знімок"}
           </Button>
         </PanelSectionRow>
-
-        {/* Превью */}
         <PreviewBox imgData={imgData} errorMsg={errorMsg} />
+
+        {/* Секція 1 — Базові фільтри */}
+        <SecHeader title="Базові фільтри" expanded={secBasic} onToggle={() => setSecBasic(!secBasic)} />
+        {secBasic && (<>
+          <PanelSectionRow>
+            <div style={{ width: "100%", boxSizing: "border-box" }}>
+              <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "4px" }}>Колір тексту субтитрів:</div>
+              <div style={{ display: "flex", gap: "3px" }}>
+                {colorButtons.map(c => (
+                  <button key={c} onClick={() => { setColorFilter(c); fetchFilteredPreview(); }} style={{
+                    flex: 1, height: "26px", borderRadius: "4px",
+                    border: colorFilter === c ? "2px solid #fff" : "2px solid transparent",
+                    backgroundColor: colorStyles[c], cursor: "pointer", padding: 0,
+                    color: "#fff", fontSize: "10px", fontWeight: "bold",
+                  }}>{c === "none" ? "✕" : c}</button>
+                ))}
+              </div>
+            </div>
+          </PanelSectionRow>
+          {colorFilter !== "none" && (
+            <PanelSectionRow>
+              <SliderField label={`Жорсткість: ${hardness}`} value={hardness}
+                min={5} max={120} step={5}
+                onChange={(v: number) => { setHardness(v); fetchFilteredPreview(); }} />
+            </PanelSectionRow>
+          )}
+          {colorFilter === "none" && (
+            <PanelSectionRow>
+              <ToggleField label="Чорно-білий режим" checked={bw} onChange={(v: boolean) => { setBw(v); fetchFilteredPreview(); }} />
+            </PanelSectionRow>
+          )}
+          <PanelSectionRow>
+            <SliderField label={`Контраст: ${(contrast / 10).toFixed(1)}x`} value={contrast}
+              min={1} max={30} step={1}
+              onChange={(v: number) => { setContrast(v); fetchFilteredPreview(); }} />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <SliderField label={`Яскравість: ${(brightness / 10).toFixed(1)}x`} value={brightness}
+              min={1} max={30} step={1}
+              onChange={(v: number) => { setBrightness(v); fetchFilteredPreview(); }} />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <SliderField label={`Мін висота тексту: ${minXheight}px`} value={minXheight}
+              min={5} max={50} step={1}
+              onChange={(v: number) => setMinXheight(v)} />
+          </PanelSectionRow>
+        </>)}
+
+        {/* Секція 2 — Контекстний фільтр */}
+        <SecHeader title="Обводка (пошук букв)" expanded={secOutline} onToggle={() => setSecOutline(!secOutline)} />
+        {secOutline && (<>
+          <PanelSectionRow>
+            <ToggleField label="Увімкнути" checked={outlineFilter} onChange={(v: boolean) => { setOutlineFilter(v); fetchFilteredPreview(); }} />
+          </PanelSectionRow>
+          {outlineFilter && (<>
+            <PanelSectionRow>
+              <SliderField label={`Поріг мін: ${outlineHmin}`} value={outlineHmin}
+                min={0} max={255} step={5}
+                onChange={(v: number) => { setOutlineHmin(v); fetchFilteredPreview(); }} />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <SliderField label={`Поріг макс: ${outlineHmax}`} value={outlineHmax}
+                min={0} max={255} step={5}
+                onChange={(v: number) => { setOutlineHmax(v); fetchFilteredPreview(); }} />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <SliderField label={`Радіус обводки: ${outlineRadius}px`} value={outlineRadius}
+                min={1} max={15} step={1}
+                onChange={(v: number) => { setOutlineRadius(v); fetchFilteredPreview(); }} />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <SliderField label={`Поріг темного: ${outlineDark}`} value={outlineDark}
+                min={0} max={128} step={5}
+                onChange={(v: number) => { setOutlineDark(v); fetchFilteredPreview(); }} />
+            </PanelSectionRow>
+          </>)}
+        </>)}
+
+        {/* Зберегти */}
+        <PanelSectionRow>
+          <Button onClick={async () => { await saveFilters(); }}
+            style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
+            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
+          </Button>
+        </PanelSectionRow>
       </PanelSection>
     );
   }
@@ -520,14 +560,14 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           <SliderField
             label={`Фільтр повторів: ${ocrSimilarity}%`}
             value={ocrSimilarity}
-            min={50} max={99} step={1}
+            min={20} max={99} step={1}
             onChange={(v: number) => setOcrSimilarity(v)}
           />
           <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
-            {ocrSimilarity <= 60 ? "Читає майже все (багато повторів)" :
+            {ocrSimilarity <= 40 ? "Дуже агресивний (пропускає різні СС)" :
+             ocrSimilarity <= 60 ? "Агресивний — менше повторів (рекомендовано)" :
              ocrSimilarity <= 80 ? "Збалансований" :
-             ocrSimilarity <= 90 ? "Фільтрує схожі фрази (дефолт)" :
-             "Строгий (тільки нові фрази)"}
+             "Слабкий — більше повторів"}
           </div>
         </PanelSectionRow>
 

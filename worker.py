@@ -1,13 +1,7 @@
 #!/usr/bin/env python3
-"""
-UA Voice Bridge — головний воркер v2
-tesserocr API постійно в пам'яті + Piper постійний процес
-"""
 import os, sys, json, time, subprocess, signal, threading
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Додаємо bin/ і tesserocr.libs до шляхів
 sys.path.insert(0, os.path.join(PLUGIN_DIR, "bin"))
 sys.path.insert(0, PLUGIN_DIR)
 _tess_libs = os.path.join(PLUGIN_DIR, "bin", "tesserocr.libs")
@@ -17,8 +11,12 @@ if os.path.exists(_tess_libs):
 from PIL import Image, ImageEnhance
 import numpy as np
 import tesserocr
+try:
+    from scipy import ndimage
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
 
-# Фільтри тексту — окремий модуль
 from uk_filter import filter_text, normalize, decide, trim_incomplete_word, UA_VOWELS
 
 CONFIG_PATH = "/home/deck/.config/ua_voice_plugin/config.json"
@@ -36,14 +34,15 @@ piper_env = {
     "LD_LIBRARY_PATH": PIPER_DIR,
 }
 
-# ── Конфіг ────────────────────────────────────────────────────────────────────
 def load_config():
     defaults = {
         "offset_bottom": 50, "width": 900, "height": 80,
         "bw": False, "contrast": 1.0, "brightness": 1.0,
         "color_filter": "none", "hardness": 30,
+        "outline_filter": False, "outline_hmin": 0, "outline_hmax": 255,
+        "outline_radius": 3, "outline_dark": 80,
         "ocr_interval": 1000, "ocr_min_len": 3, "ocr_ignore_words": "",
-        "ocr_psm": 6, "ocr_similarity": 80,
+        "ocr_psm": 6, "ocr_similarity": 80, "ocr_min_xheight": 10,
         "typewriter_mode": False, "typewriter_threshold": 80,
         "tts_speaker": 1, "tts_speed": 0.8,
     }
@@ -53,67 +52,94 @@ def load_config():
     except:
         return defaults
 
-# ── Фільтри зображення ────────────────────────────────────────────────────────
 def apply_filters(img, cfg):
-    # Різкість (до кольорового фільтру)
-    sharpen = int(cfg.get("sharpen", 0))
-    sharpen_radius = float(cfg.get("sharpen_radius", 2.0))
-    if sharpen > 0:
-        from PIL import ImageFilter
-        img = img.filter(ImageFilter.UnsharpMask(
-            radius=sharpen_radius, percent=sharpen, threshold=3))
     if cfg.get("brightness", 1.0) != 1.0:
         img = ImageEnhance.Brightness(img).enhance(cfg["brightness"])
     if cfg.get("contrast", 1.0) != 1.0:
         img = ImageEnhance.Contrast(img).enhance(cfg["contrast"])
-    color    = cfg.get("color_filter", "none")
-    hardness = int(cfg.get("hardness", 30))
-    if color != "none":
+
+    if cfg.get("outline_filter", False):
+        def _dilate(m, r):
+            if HAS_SCIPY:
+                y, x = np.ogrid[-r:r+1, -r:r+1]
+                kernel = (x*x + y*y <= r*r).astype(np.uint8)
+                return ndimage.binary_dilation(m, structure=kernel).astype(bool)
+            else:
+                a = m.astype(np.uint8)
+                res = np.zeros_like(a)
+                for dy in range(-r, r+1):
+                    for dx in range(-r, r+1):
+                        if dy*dy + dx*dx <= r*r:
+                            res |= np.roll(np.roll(a, dy, axis=0), dx, axis=1)
+                return res.astype(bool)
+        
+        color = cfg.get("color_filter", "W")
+        oh_min = int(cfg.get("outline_hmin", 0))
+        oh_max = int(cfg.get("outline_hmax", 255))
+        dark_thr = int(cfg.get("outline_dark", 80))
+        radius = int(cfg.get("outline_radius", 3))
         arr = np.array(img.convert("RGB"), dtype=np.int16)
         R, G, B = arr[:,:,0], arr[:,:,1], arr[:,:,2]
-        if   color == "R": mask = (R - np.maximum(G, B)) > hardness
-        elif color == "G": mask = (G - np.maximum(R, B)) > hardness
-        elif color == "B": mask = (B - np.maximum(R, G)) > hardness
-        elif color == "Y": mask = (np.minimum(R, G) - B) > hardness
-        elif color == "W": mask = np.minimum(np.minimum(R, G), B) > (255 - hardness)
-        elif color == "S": mask = (np.abs(R.astype(np.int16) - G) < hardness) & (np.abs(G.astype(np.int16) - B) < hardness) & (R > 100)
-        else:              mask = np.ones(R.shape, dtype=bool)
-        result = np.zeros_like(arr, dtype=np.uint8)
-        result[mask] = 255
-        img = Image.fromarray(result.astype(np.uint8))
-    elif cfg.get("bw", False):
-        img = img.convert("L").convert("RGB")
+        if   color == "R": diff = R - np.maximum(G, B); mask = (diff >= oh_min) & (diff <= oh_max)
+        elif color == "G": diff = G - np.maximum(R, B); mask = (diff >= oh_min) & (diff <= oh_max)
+        elif color == "B": diff = B - np.maximum(R, G); mask = (diff >= oh_min) & (diff <= oh_max)
+        elif color == "Y": diff = np.minimum(R,G) - B;  mask = (diff >= oh_min) & (diff <= oh_max)
+        elif color == "W":
+            val = np.minimum(np.minimum(R, G), B)
+            mask = (val >= (255 - oh_max)) & (val <= (255 - oh_min))
+        elif color == "S":
+            diff = np.maximum(np.maximum(np.abs(R-G), np.abs(G-B)), np.abs(R-B))
+            mask = (diff <= oh_max) & ((R+G+B)//3 >= oh_min)
+        else: mask = np.ones(R.shape, dtype=bool)
+        gray = np.array(img.convert("L"))
+        dilated = _dilate(mask, radius)
+        outline_zone = dilated & ~mask
+        dark_in_outline = (gray < dark_thr) & outline_zone
+        has_dark = _dilate(dark_in_outline, radius)
+        result = np.zeros_like(gray)
+        result[mask & has_dark] = 255
+        img = Image.fromarray(result).convert("RGB")
+    else:
+        color = cfg.get("color_filter", "none")
+        hardness = int(cfg.get("hardness", 30))
+        if color != "none":
+            arr = np.array(img.convert("RGB"), dtype=np.int16)
+            R, G, B = arr[:,:,0], arr[:,:,1], arr[:,:,2]
+            if   color == "R": mask = (R - np.maximum(G, B)) > hardness
+            elif color == "G": mask = (G - np.maximum(R, B)) > hardness
+            elif color == "B": mask = (B - np.maximum(R, G)) > hardness
+            elif color == "Y": mask = (np.minimum(R, G) - B) > hardness
+            elif color == "W": mask = np.minimum(np.minimum(R, G), B) > (255 - hardness)
+            elif color == "S": mask = (np.abs(R-G) < hardness) & (np.abs(G-B) < hardness) & (R > 100)
+            else: mask = np.ones(R.shape, dtype=bool)
+            result = np.zeros_like(arr, dtype=np.uint8)
+            result[mask] = 255
+            img = Image.fromarray(result.astype(np.uint8))
+        elif cfg.get("bw", False):
+            img = img.convert("L").convert("RGB")
     return img
 
-
-# ── TTS — постійний Piper процес ─────────────────────────────────────────────
 _piper_proc = None
 _piper_lock = threading.Lock()
 
 def start_piper(cfg):
     global _piper_proc
-    speaker     = int(cfg.get("tts_speaker", 1))
-    speed       = float(cfg.get("tts_speed", 1.0))
+    speaker = int(cfg.get("tts_speaker", 1))
+    speed = float(cfg.get("tts_speed", 1.0))
     noise_scale = float(cfg.get("tts_noise_scale", 0.667))
-    noise_w     = float(cfg.get("tts_noise_w", 0.8))
+    noise_w = float(cfg.get("tts_noise_w", 0.8))
     _piper_proc = subprocess.Popen(
         [PIPER_BIN, "--model", MODEL,
-         "--speaker",     str(speaker),
-         "--length_scale", str(speed),
-         "--noise_scale",  str(noise_scale),
-         "--noise_w",      str(noise_w),
+         "--speaker", str(speaker), "--length_scale", str(speed),
+         "--noise_scale", str(noise_scale), "--noise_w", str(noise_w),
          "--output_raw"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=piper_env, cwd=PIPER_DIR,
     )
     subprocess.Popen(
         ["aplay", "-r", "22050", "-f", "S16_LE", "-t", "raw", "-"],
-        stdin=_piper_proc.stdout,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=piper_env,
+        stdin=_piper_proc.stdout, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, env=piper_env,
     )
     def _log_stderr():
         for line in _piper_proc.stderr:
@@ -135,7 +161,6 @@ def speak(text, cfg):
             print(f"Piper write error: {e}", file=sys.stderr)
             _piper_proc = None
 
-# ── Знімок ────────────────────────────────────────────────────────────────────
 def take_screenshot(cfg):
     w = cfg["width"]; h = cfg["height"]; ob = cfg["offset_bottom"]
     l = (SCREEN_W - w) // 2; r = (SCREEN_W - w) // 2
@@ -144,8 +169,8 @@ def take_screenshot(cfg):
     try:
         subprocess.run([
             "gst-launch-1.0", "pipewiresrc", "num-buffers=1", "!",
-            "videoconvert", "!",
-            "videocrop", f"top={top}", f"bottom={bot}", f"left={l}", f"right={r}", "!",
+            "videoconvert", "!", "videocrop",
+            f"top={top}", f"bottom={bot}", f"left={l}", f"right={r}", "!",
             "pngenc", "snapshot=true", "!", "filesink", f"location={tmp}"
         ], capture_output=True, timeout=3)
     except subprocess.TimeoutExpired:
@@ -155,9 +180,12 @@ def take_screenshot(cfg):
         return final
     return None
 
-# ── Головний цикл ─────────────────────────────────────────────────────────────
 def main():
     print(f"=== ВОРКЕР ЗАПУЩЕНО {time.strftime('%c')} ===", flush=True)
+    if HAS_SCIPY:
+        print("scipy доступна ✅", flush=True)
+    else:
+        print("scipy недоступна, дилатація буде повільною ⚠️", flush=True)
 
     cfg = load_config()
     cfg_mtime = os.path.getmtime(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else 0
@@ -167,7 +195,6 @@ def main():
     print(f"tesserocr готовий за {(time.monotonic()-t0)*1000:.0f} мс", flush=True)
 
     start_piper(cfg)
-
     last_text = ""
     running = True
 
@@ -181,28 +208,23 @@ def main():
 
     while running:
         t_start = time.monotonic()
-
         try:
             mtime = os.path.getmtime(CONFIG_PATH)
             if mtime != cfg_mtime:
                 old_speaker = cfg.get("tts_speaker", 1)
-                old_speed   = cfg.get("tts_speed", 0.8)
+                old_speed = cfg.get("tts_speed", 0.8)
                 cfg = load_config()
                 cfg_mtime = mtime
-                last_text = ""  # скидаємо при зміні гри/конфігу
+                last_text = ""
                 ocr_api.SetVariable("tessedit_pageseg_mode", str(cfg.get("ocr_psm", 6)))
-                if (cfg.get("tts_speaker", 1) != old_speaker or
-                    cfg.get("tts_speed", 1.0) != old_speed):
+                if (cfg.get("tts_speaker", 1) != old_speaker or cfg.get("tts_speed", 1.0) != old_speed):
                     if _piper_proc and _piper_proc.poll() is None:
                         _piper_proc.terminate()
                     start_piper(cfg)
                     print("Piper перезапущено", flush=True)
-                else:
-                    print("Конфіг перечитано", flush=True)
         except: pass
 
         interval = cfg.get("ocr_interval", 1000) / 1000.0
-
         img_path = take_screenshot(cfg)
         if not img_path:
             time.sleep(interval)
@@ -213,6 +235,7 @@ def main():
             img = Image.open(img_path)
             img = apply_filters(img, cfg)
             ocr_api.SetImage(img.convert("L"))
+            ocr_api.SetVariable("textord_min_xheight", str(int(cfg.get("ocr_min_xheight", 10))))
             raw = ocr_api.GetUTF8Text().strip()
             new_text = filter_text(raw, cfg)
             print(f"OCR: {new_text} [{(time.monotonic()-t_ocr)*1000:.0f}мс]", flush=True)
