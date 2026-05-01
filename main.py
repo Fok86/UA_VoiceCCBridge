@@ -58,6 +58,8 @@ def load_config(appid=None):
         "ocr_psm": 6, "ocr_oem": 1, "ocr_similarity": 80, "ocr_min_xheight": 10,
         "typewriter_mode": False, "typewriter_threshold": 80,
         "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
+        "tts_cpu_idle": True, "tts_omp_threads": 1, "tts_nice": 0,
+        "tts_malloc_arena": False, "tts_malloc_mmap": False,
         "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
     }
     if os.path.exists(CONFIG_PATH):
@@ -180,11 +182,14 @@ class Plugin:
         save_config({"typewriter_mode": enabled, "typewriter_threshold": threshold}, appid)
         return {"success": True}
 
-    async def save_tts_settings(self, speaker: int, speed: float, volume: int, noise_scale: float = 0.667, noise_w: float = 0.8):
+    async def save_tts_settings(self, speaker: int, speed: float, volume: int, noise_scale: float = 0.667, noise_w: float = 0.8,
+                                cpu_idle: bool = True, omp_threads: int = 1, nice: int = 0,
+                                malloc_arena: bool = False, malloc_mmap: bool = False):
         appid, _ = get_running_game()
-        if not appid: return {"success": True}
         save_config({"tts_speaker": speaker, "tts_speed": speed, "tts_volume": volume,
-                     "tts_noise_scale": noise_scale, "tts_noise_w": noise_w}, appid)
+                     "tts_noise_scale": noise_scale, "tts_noise_w": noise_w,
+                     "tts_cpu_idle": cpu_idle, "tts_omp_threads": omp_threads, "tts_nice": nice,
+                     "tts_malloc_arena": malloc_arena, "tts_malloc_mmap": malloc_mmap}, appid)
         return {"success": True}
 
     async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int,
