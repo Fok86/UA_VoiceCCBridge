@@ -47,58 +47,45 @@ def get_running_game():
 def get_profile_path(appid):
     return os.path.join(PROFILES_DIR, f"{appid}.json") if appid else None
 
+DEFAULTS = {
+    "offset_bottom": 50, "width": 900, "height": 80,
+    "bw": False, "contrast": 1.0, "brightness": 1.0,
+    "color_filter": "none", "hardness": 30,
+    "outline_filter": False, "outline_hmin": 0, "outline_hmax": 255,
+    "outline_radius": 3, "outline_dark": 80,
+    "ocr_interval": 1000, "ocr_min_len": 3, "ocr_ignore_words": "",
+    "ocr_psm": 6, "ocr_oem": 1, "ocr_similarity": 80, "ocr_min_xheight": 10,
+    "typewriter_mode": False, "typewriter_threshold": 80,
+    "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
+    "tts_cpu_idle": True, "tts_omp_threads": 1, "tts_nice": 0,
+    "tts_malloc_arena": False, "tts_malloc_mmap": False,
+    "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
+}
+
 def load_config(appid=None):
-    defaults = {
-        "offset_bottom": 50, "width": 900, "height": 80,
-        "bw": False, "contrast": 1.0, "brightness": 1.0,
-        "color_filter": "none", "hardness": 30,
-        "outline_filter": False, "outline_hmin": 0, "outline_hmax": 255,
-        "outline_radius": 3, "outline_dark": 80,
-        "ocr_interval": 1000, "ocr_min_len": 3, "ocr_ignore_words": "",
-        "ocr_psm": 6, "ocr_oem": 1, "ocr_similarity": 80, "ocr_min_xheight": 10,
-        "typewriter_mode": False, "typewriter_threshold": 80,
-        "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
-        "tts_cpu_idle": True, "tts_omp_threads": 1, "tts_nice": 0,
-        "tts_malloc_arena": False, "tts_malloc_mmap": False,
-        "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
-    }
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH) as f:
-                defaults = {**defaults, **json.load(f)}
-        except: pass
+    cfg = dict(DEFAULTS)
     if appid:
         profile_path = get_profile_path(appid)
         if profile_path and os.path.exists(profile_path):
             try:
                 with open(profile_path) as f:
-                    defaults = {**defaults, **json.load(f)}
+                    cfg = {**cfg, **json.load(f)}
             except: pass
-    return defaults
+    return cfg
 
 def save_config(data: dict, appid=None):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     decky_plugin.logger.info(f"UA_LOG: save_config appid={appid} data={list(data.keys())}")
-    if appid:
-        os.makedirs(PROFILES_DIR, exist_ok=True)
-        profile_path = get_profile_path(appid)
-        current = {}
-        if os.path.exists(profile_path):
-            try:
-                with open(profile_path) as f:
-                    current = json.load(f)
-            except: pass
-        current.update(data)
-        with open(profile_path, "w") as f:
-            json.dump(current, f)
-        merged = load_config(appid)
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(merged, f)
-    else:
-        current = load_config()
-        current.update(data)
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(current, f)
+    os.makedirs(PROFILES_DIR, exist_ok=True)
+    # Зберігаємо в профіль гри (або дефолтний якщо нема гри)
+    profile_path = get_profile_path(appid) if appid else CONFIG_PATH
+    current = load_config(appid)
+    current.update(data)
+    with open(profile_path, "w") as f:
+        json.dump(current, f)
+    # Оновлюємо CONFIG_PATH для worker.py
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(current, f)
 
 def calc_crop(cfg: dict):
     w = cfg["width"]; h = cfg["height"]; ob = cfg["offset_bottom"]
@@ -280,38 +267,11 @@ class Plugin:
         }
 
     async def test_tts(self, text: str = "Привіт! Це тест синтезу мови."):
-        cfg = load_config()
-        piper_dir = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "piper")
-        piper_bin = os.path.join(piper_dir, "piper")
-        model = os.path.join(piper_dir, "uk_UA-ukrainian_tts-medium.onnx")
-        wav_file = "/dev/shm/ua_tts_test.wav"
-        env = {
-            **os.environ,
-            "LD_LIBRARY_PATH": piper_dir,
-            "XDG_RUNTIME_DIR": "/run/user/1000",
-            "PULSE_RUNTIME_PATH": "/run/user/1000/pulse",
-        }
         try:
-            piper = await asyncio.create_subprocess_exec(
-                piper_bin, "--model", model,
-                "--speaker", str(cfg["tts_speaker"]),
-                "--length_scale", str(cfg["tts_speed"]),
-                "--output_file", wav_file,
-                stdin=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=env, cwd=piper_dir,
-            )
-            piper.stdin.write(text.encode())
-            piper.stdin.close()
-            await piper.wait()
-            aplay = await asyncio.create_subprocess_exec(
-                "paplay", wav_file,
-                stderr=asyncio.subprocess.DEVNULL, env=env,
-            )
-            await aplay.wait()
+            with open("/tmp/ua_tts_test.txt", "w") as f:
+                f.write(text)
             return {"success": True}
         except Exception as e:
-            decky_plugin.logger.error(f"UA_LOG: TTS error: {e}")
             return {"success": False, "error": str(e)}
 
     async def toggle_worker(self, active: bool = False):

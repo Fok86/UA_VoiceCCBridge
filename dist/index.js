@@ -202,7 +202,6 @@ var plugin_export = (function () {
         const [outlineHmax, setOutlineHmax] = SP_REACT.useState(255);
         const [outlineRadius, setOutlineRadius] = SP_REACT.useState(3);
         const [outlineDark, setOutlineDark] = SP_REACT.useState(80);
-        const [outlineMinArea, setOutlineMinArea] = SP_REACT.useState(20);
         const [minXheight, setMinXheight] = SP_REACT.useState(10);
         const [secBasic, setSecBasic] = SP_REACT.useState(true);
         const [secOutline, setSecOutline] = SP_REACT.useState(false);
@@ -222,6 +221,11 @@ var plugin_export = (function () {
         const [ttsVolume, setTtsVolume] = SP_REACT.useState(100);
         const [ttsNoiseScale, setTtsNoiseScale] = SP_REACT.useState(67); // 0.667 * 100
         const [ttsNoiseW, setTtsNoiseW] = SP_REACT.useState(80); // 0.8 * 100
+        const [ttsCpuIdle, setTtsCpuIdle] = SP_REACT.useState(true);
+        const [ttsOmpThreads, setTtsOmpThreads] = SP_REACT.useState(1);
+        const [ttsNice, setTtsNice] = SP_REACT.useState(0);
+        const [ttsMallocArena, setTtsMallocArena] = SP_REACT.useState(false);
+        const [ttsMallocMmap, setTtsMallocMmap] = SP_REACT.useState(false);
         const DFL = window.DFL;
         const { PanelSection, PanelSectionRow, Button, ToggleField, SliderField } = DFL || {};
         // При вході в меню
@@ -247,7 +251,7 @@ var plugin_export = (function () {
             const timer = setTimeout(() => { fetchFilteredPreview(); }, 300);
             return () => clearTimeout(timer);
         }, [bw, contrast, brightness, colorFilter, hardness,
-            outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
+            outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark]);
         const loadZone = async () => {
             const res = await serverApi.callPluginMethod("get_zone", {});
             if (res.success && res.result.success) {
@@ -271,7 +275,6 @@ var plugin_export = (function () {
                 const outlineHmax_ = z.outline_hmax ?? 255;
                 const outlineRadius_ = z.outline_radius ?? 3;
                 const outlineDark_ = z.outline_dark ?? 80;
-                const outlineMinArea_ = z.outline_min_area ?? 0;
                 setBw(bw_);
                 setContrast(contrast_);
                 setBrightness(brightness_);
@@ -282,7 +285,6 @@ var plugin_export = (function () {
                 setOutlineHmax(outlineHmax_);
                 setOutlineRadius(outlineRadius_);
                 setOutlineDark(outlineDark_);
-                setOutlineMinArea(outlineMinArea_);
                 setMinXheight(z.ocr_min_xheight || 10);
                 // Одразу показуємо превью з завантаженими значеннями
                 const prev = await serverApi.callPluginMethod("get_filtered_preview", {
@@ -291,7 +293,6 @@ var plugin_export = (function () {
                     outline_filter: outlineFilter_,
                     outline_hmin: outlineHmin_, outline_hmax: outlineHmax_,
                     outline_radius: outlineRadius_, outline_dark: outlineDark_,
-                    outline_min_area: outlineMinArea_,
                 });
                 if (prev.success && prev.result.success) {
                     setImgData(prev.result.image);
@@ -346,6 +347,11 @@ var plugin_export = (function () {
                 setTtsVolume(z.tts_volume ?? 100);
                 setTtsNoiseScale(Math.round((z.tts_noise_scale ?? 0.667) * 100));
                 setTtsNoiseW(Math.round((z.tts_noise_w ?? 0.8) * 100));
+                setTtsCpuIdle(z.tts_cpu_idle ?? true);
+                setTtsOmpThreads(z.tts_omp_threads ?? 1);
+                setTtsNice(z.tts_nice ?? 0);
+                setTtsMallocArena(z.tts_malloc_arena ?? false);
+                setTtsMallocMmap(z.tts_malloc_mmap ?? false);
             }
         };
         const loadOcrSettings = async () => {
@@ -464,7 +470,7 @@ var plugin_export = (function () {
                                     "\u00D7",
                                     zoneHeight)))))),
                 SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(Button, { onClick: saveZone, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
+                    SP_REACT.createElement(Button, { onClick: async () => { await saveZone(); }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
                         "\uD83D\uDCBE ",
                         currentGame.name ? currentGame.name : "Гра не запущена")),
                 SP_REACT.createElement(PanelSectionRow, null,
@@ -635,9 +641,10 @@ var plugin_export = (function () {
                     SP_REACT.createElement("div", { style: { width: "100%" } },
                         SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "4px" } }, "\u0413\u043E\u043B\u043E\u0441:"),
                         SP_REACT.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px" } }, [
-                            { v: 0, l: "Lada", icon: "👩" },
-                            { v: 1, l: "Mykyta", icon: "👨" },
-                            { v: 2, l: "Tetiana", icon: "👩" },
+                            { v: 1, l: "Микита", icon: "👨" },
+                            { v: 0, l: "Лада", icon: "👩" },
+                            { v: 2, l: "Тетяна", icon: "👩" },
+                            { v: 4, l: "Даринка", icon: "🧒" },
                         ].map(({ v, l, icon }) => (SP_REACT.createElement("button", { key: v, onClick: () => setTtsSpeaker(v), style: {
                                 padding: "8px 4px", borderRadius: "4px", border: "none",
                                 backgroundColor: ttsSpeaker === v ? "#1a9fff" : "#2a3140",
@@ -651,33 +658,28 @@ var plugin_export = (function () {
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Гучність: ${ttsVolume}%`, value: ttsVolume, min: 10, max: 100, step: 5, onChange: (v) => setTtsVolume(v) })),
                 SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(SliderField, { label: `Живість голосу: ${ttsNoiseScale}%`, value: ttsNoiseScale, min: 50, max: 100, step: 1, onChange: (v) => setTtsNoiseScale(v) }),
+                    SP_REACT.createElement(SliderField, { label: `Живість голосу: ${ttsNoiseScale}%`, value: ttsNoiseScale, min: 0, max: 100, step: 1, onChange: (v) => setTtsNoiseScale(v) }),
                     SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ttsNoiseScale <= 65 ? "Монотонний" :
                         ttsNoiseScale <= 75 ? "Природній (дефолт)" :
                             "Емоційний")),
                 SP_REACT.createElement(PanelSectionRow, null,
-                    SP_REACT.createElement(SliderField, { label: `Дихання: ${ttsNoiseW}%`, value: ttsNoiseW, min: 60, max: 100, step: 1, onChange: (v) => setTtsNoiseW(v) }),
+                    SP_REACT.createElement(SliderField, { label: `Дихання: ${ttsNoiseW}%`, value: ttsNoiseW, min: 0, max: 100, step: 1, onChange: (v) => setTtsNoiseW(v) }),
                     SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ttsNoiseW <= 70 ? "Чіткий" :
                         ttsNoiseW <= 85 ? "Природній (дефолт)" :
                             "М'який")),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => {
                             await serverApi.callPluginMethod("save_tts_settings", {
-                                speaker: ttsSpeaker,
-                                speed: ttsSpeed,
-                                volume: ttsVolume,
-                                noise_scale: ttsNoiseScale / 100,
-                                noise_w: ttsNoiseW / 100,
+                                speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
+                                noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
+                                cpu_idle: ttsCpuIdle, omp_threads: ttsOmpThreads, nice: ttsNice,
+                                malloc_arena: ttsMallocArena, malloc_mmap: ttsMallocMmap,
                             });
                         }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
                         "\uD83D\uDCBE ",
                         currentGame.name ? currentGame.name : "Гра не запущена")),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => {
-                            await serverApi.callPluginMethod("save_tts_settings", {
-                                speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
-                                noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
-                            });
                             await serverApi.callPluginMethod("test_tts", {
                                 text: "Привіт! Це тест синтезу мови українською."
                             });

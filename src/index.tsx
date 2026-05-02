@@ -121,7 +121,6 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [outlineHmax, setOutlineHmax] = useState(255);
   const [outlineRadius, setOutlineRadius] = useState(3);
   const [outlineDark, setOutlineDark] = useState(80);
-  const [outlineMinArea, setOutlineMinArea] = useState(20);
   const [minXheight, setMinXheight] = useState(10);
   const [secBasic, setSecBasic] = useState(true);
   const [secOutline, setSecOutline] = useState(false);
@@ -143,6 +142,11 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [ttsVolume, setTtsVolume] = useState(100);
   const [ttsNoiseScale, setTtsNoiseScale] = useState(67);  // 0.667 * 100
   const [ttsNoiseW, setTtsNoiseW] = useState(80);          // 0.8 * 100
+  const [ttsCpuIdle, setTtsCpuIdle] = useState(true);
+  const [ttsOmpThreads, setTtsOmpThreads] = useState(1);
+  const [ttsNice, setTtsNice] = useState(0);
+  const [ttsMallocArena, setTtsMallocArena] = useState(false);
+  const [ttsMallocMmap, setTtsMallocMmap] = useState(false);
 
   const DFL = (window as any).DFL;
   const { PanelSection, PanelSectionRow, Button, ToggleField, SliderField } = DFL || {};
@@ -150,8 +154,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   // При вході в меню
   useEffect(() => {
     if (activeMenu === "image") { loadZone(); fetchImg(); }
-    if (activeMenu === "filters") { loadFilters(); fetchImg(); }
-    if (activeMenu === "ocr") { loadOcrSettings(); fetchImg(); }
+    if (activeMenu === "filters") { loadFilters(); }
+    if (activeMenu === "ocr") { loadOcrSettings(); }
     if (activeMenu === "tts") { loadTtsSettings(); }
   }, [activeMenu]);
 
@@ -161,7 +165,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     const timer = setTimeout(() => { fetchFilteredPreview(); }, 300);
     return () => clearTimeout(timer);
   }, [bw, contrast, brightness, colorFilter, hardness,
-      outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
+      outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark]);
 
   const loadZone = async () => {
     const res = await serverApi.callPluginMethod("get_zone", {});
@@ -187,13 +191,11 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       const outlineHmax_ = z.outline_hmax ?? 255;
       const outlineRadius_ = z.outline_radius ?? 3;
       const outlineDark_ = z.outline_dark ?? 80;
-      const outlineMinArea_ = z.outline_min_area ?? 0;
       setBw(bw_); setContrast(contrast_); setBrightness(brightness_);
       setColorFilter(colorFilter_); setHardness(hardness_);
       setOutlineFilter(outlineFilter_);
       setOutlineHmin(outlineHmin_); setOutlineHmax(outlineHmax_);
       setOutlineRadius(outlineRadius_); setOutlineDark(outlineDark_);
-      setOutlineMinArea(outlineMinArea_);
       setMinXheight(z.ocr_min_xheight || 10);
       // Одразу показуємо превью з завантаженими значеннями
       const prev = await serverApi.callPluginMethod("get_filtered_preview", {
@@ -202,7 +204,6 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         outline_filter: outlineFilter_,
         outline_hmin: outlineHmin_, outline_hmax: outlineHmax_,
         outline_radius: outlineRadius_, outline_dark: outlineDark_,
-        outline_min_area: outlineMinArea_,
       });
       if (prev.success && prev.result.success) {
         setImgData(prev.result.image); setErrorMsg(null);
@@ -228,7 +229,6 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       outline_filter: outlineFilter,
       outline_hmin: outlineHmin, outline_hmax: outlineHmax,
       outline_radius: outlineRadius, outline_dark: outlineDark,
-      outline_min_area: outlineMinArea,
     });
     if (res.success && res.result.success) {
       setImgData(res.result.image); setErrorMsg(null);
@@ -236,7 +236,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       setErrorMsg(res.result?.error || "Помилка");
     }
   }, [serverApi, bw, contrast, brightness, colorFilter, hardness,
-      outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark, outlineMinArea]);
+      outlineFilter, outlineHmin, outlineHmax, outlineRadius, outlineDark]);
 
   const saveFilters = async () => {
     await serverApi.callPluginMethod("save_filters", {
@@ -245,7 +245,6 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       outline_filter: outlineFilter,
       outline_hmin: outlineHmin, outline_hmax: outlineHmax,
       outline_radius: outlineRadius, outline_dark: outlineDark,
-      outline_min_area: outlineMinArea,
       ocr_min_xheight: minXheight,
     });
   };
@@ -259,6 +258,11 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       setTtsVolume(z.tts_volume ?? 100);
       setTtsNoiseScale(Math.round((z.tts_noise_scale ?? 0.667) * 100));
       setTtsNoiseW(Math.round((z.tts_noise_w ?? 0.8) * 100));
+      setTtsCpuIdle(z.tts_cpu_idle ?? true);
+      setTtsOmpThreads(z.tts_omp_threads ?? 1);
+      setTtsNice(z.tts_nice ?? 0);
+      setTtsMallocArena(z.tts_malloc_arena ?? false);
+      setTtsMallocMmap(z.tts_malloc_mmap ?? false);
     }
   };
 
@@ -396,7 +400,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         </>)}
 
         <PanelSectionRow>
-          <Button onClick={saveZone}
+          <Button onClick={async () => { await saveZone(); }}
             style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
             💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
           </Button>
@@ -651,6 +655,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         {/* Кнопка зберегти */}
         <PanelSectionRow>
           <Button onClick={async () => {
+           
             await serverApi.callPluginMethod("save_ocr_settings", {
               interval: ocrInterval,
               min_len: ocrMinLen,
@@ -663,6 +668,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               enabled: typewriterMode,
               threshold: typewriterThreshold,
             });
+           
           }} style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
             💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
           </Button>
@@ -716,9 +722,10 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
             <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "4px" }}>Голос:</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px" }}>
               {[
-                {v: 0, l: "Lada", icon: "👩"},
-                {v: 1, l: "Mykyta", icon: "👨"},
-                {v: 2, l: "Tetiana", icon: "👩"},
+                {v: 1, l: "Микита", icon: "👨"},
+                {v: 0, l: "Лада", icon: "👩"},
+                {v: 2, l: "Тетяна", icon: "👩"},
+                {v: 4, l: "Даринка", icon: "🧒"},
               ].map(({v, l, icon}) => (
                 <button key={v} onClick={() => setTtsSpeaker(v)} style={{
                   padding: "8px 4px", borderRadius: "4px", border: "none",
@@ -755,7 +762,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           <SliderField
             label={`Живість голосу: ${ttsNoiseScale}%`}
             value={ttsNoiseScale}
-            min={50} max={100} step={1}
+            min={0} max={100} step={1}
             onChange={(v: number) => setTtsNoiseScale(v)}
           />
           <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
@@ -770,7 +777,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           <SliderField
             label={`Дихання: ${ttsNoiseW}%`}
             value={ttsNoiseW}
-            min={60} max={100} step={1}
+            min={0} max={100} step={1}
             onChange={(v: number) => setTtsNoiseW(v)}
           />
           <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
@@ -784,12 +791,12 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         <PanelSectionRow>
           <Button onClick={async () => {
             await serverApi.callPluginMethod("save_tts_settings", {
-              speaker: ttsSpeaker,
-              speed: ttsSpeed,
-              volume: ttsVolume,
-              noise_scale: ttsNoiseScale / 100,
-              noise_w: ttsNoiseW / 100,
+              speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
+              noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
+              cpu_idle: ttsCpuIdle, omp_threads: ttsOmpThreads, nice: ttsNice,
+              malloc_arena: ttsMallocArena, malloc_mmap: ttsMallocMmap,
             });
+           
           }} style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
             💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
           </Button>
@@ -798,10 +805,6 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         {/* Тест TTS */}
         <PanelSectionRow>
           <Button onClick={async () => {
-            await serverApi.callPluginMethod("save_tts_settings", {
-              speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
-              noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
-            });
             await serverApi.callPluginMethod("test_tts", {
               text: "Привіт! Це тест синтезу мови українською."
             });

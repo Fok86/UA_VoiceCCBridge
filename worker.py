@@ -30,15 +30,28 @@ TESSDATA    = os.path.join(PLUGIN_DIR, "tessdata/")
 PIPER_DIR   = os.path.join(PLUGIN_DIR, "piper")
 PIPER_BIN   = os.path.join(PIPER_DIR, "piper")
 MODEL       = os.path.join(PIPER_DIR, "uk_UA-ukrainian_tts-medium.onnx")
+MODEL_LADA  = os.path.join(PIPER_DIR, "uk_UA-lada-x_low.onnx")
 SCREEN_W, SCREEN_H = 1280, 800
 
-piper_env = {
+piper_env_base = {
     "PATH": "/usr/local/bin:/usr/bin:/usr/sbin",
     "HOME": "/home/deck",
     "XDG_RUNTIME_DIR": "/run/user/1000",
     "PULSE_RUNTIME_PATH": "/run/user/1000/pulse",
     "LD_LIBRARY_PATH": PIPER_DIR,
 }
+
+def build_piper_env(cfg):
+    env = dict(piper_env_base)
+    omp = str(int(cfg.get("tts_omp_threads", 1)))
+    env["OMP_NUM_THREADS"] = omp
+    env["MKL_NUM_THREADS"] = omp
+    env["OPENBLAS_NUM_THREADS"] = omp
+    if cfg.get("tts_malloc_arena", False):
+        env["MALLOC_ARENA_MAX"] = "1"
+    if cfg.get("tts_malloc_mmap", False):
+        env["MALLOC_MMAP_THRESHOLD_"] = "131072"
+    return env
 
 def load_config():
     defaults = {
@@ -51,6 +64,8 @@ def load_config():
         "ocr_psm": 6, "ocr_similarity": 80, "ocr_min_xheight": 10,
         "typewriter_mode": False, "typewriter_threshold": 80,
         "tts_speaker": 1, "tts_speed": 0.8,
+        "tts_cpu_idle": True, "tts_omp_threads": 1, "tts_nice": 0,
+        "tts_malloc_arena": False, "tts_malloc_mmap": False,
     }
     try:
         with open(CONFIG_PATH) as f:
@@ -134,18 +149,39 @@ def start_piper(cfg):
     speed = float(cfg.get("tts_speed", 1.0))
     noise_scale = float(cfg.get("tts_noise_scale", 0.667))
     noise_w = float(cfg.get("tts_noise_w", 0.8))
+    cpu_idle = cfg.get("tts_cpu_idle", True)
+    nice_val = int(cfg.get("tts_nice", 0))
+
+    env = build_piper_env(cfg)
+
+    # Даринка = speaker 4 → окрема модель x_low
+    if speaker == 4:
+        model = MODEL_LADA
+        spk_arg = "0"  # x_low має тільки 1 спікер
+        speed = speed * 2  # x_low дуже швидка — компенсуємо
+    else:
+        model = MODEL
+        spk_arg = str(speaker)
+
+    cmd = []
+    if cpu_idle:
+        cmd += ["chrt", "--idle", "0"]
+    if nice_val > 0:
+        cmd += ["nice", "-n", str(nice_val)]
+    cmd += [PIPER_BIN, "--model", model,
+            "--speaker", spk_arg, "--length_scale", str(speed),
+            "--noise_scale", str(noise_scale), "--noise_w", str(noise_w),
+            "--output_raw"]
+
     _piper_proc = subprocess.Popen(
-        [PIPER_BIN, "--model", MODEL,
-         "--speaker", str(speaker), "--length_scale", str(speed),
-         "--noise_scale", str(noise_scale), "--noise_w", str(noise_w),
-         "--output_raw"],
+        cmd,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        env=piper_env, cwd=PIPER_DIR,
+        env=env, cwd=PIPER_DIR,
     )
     subprocess.Popen(
         ["aplay", "-r", "22050", "-f", "S16_LE", "-t", "raw", "-"],
         stdin=_piper_proc.stdout, stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, env=piper_env,
+        stderr=subprocess.DEVNULL, env=env,
     )
     def _log_stderr():
         for line in _piper_proc.stderr:
@@ -225,9 +261,23 @@ def main():
                 cfg_mtime = mtime
                 last_text = ""
                 ocr_api.SetVariable("tessedit_pageseg_mode", str(cfg.get("ocr_psm", 6)))
+                if _piper_proc:
+                    _piper_proc.kill()
+                start_piper(cfg)
         except: pass
 
         interval = cfg.get("ocr_interval", 1000) / 1000.0
+
+        # TEST FILE: тест голосу з UI
+        test_file = "/tmp/ua_tts_test.txt"
+        if os.path.exists(test_file):
+            try:
+                with open(test_file) as f:
+                    test_text = f.read().strip()
+                os.remove(test_file)
+                if test_text:
+                    speak(test_text, cfg)
+            except: pass
 
         # 2. SCREENSHOT
         t_ss = time.monotonic()
