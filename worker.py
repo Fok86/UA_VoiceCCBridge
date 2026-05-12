@@ -31,6 +31,8 @@ PIPER_DIR   = os.path.join(PLUGIN_DIR, "piper")
 PIPER_BIN   = os.path.join(PIPER_DIR, "piper")
 MODEL       = os.path.join(PIPER_DIR, "uk_UA-ukrainian_tts-medium.onnx")
 MODEL_LADA  = os.path.join(PIPER_DIR, "uk_UA-lada-x_low.onnx")
+RHVOICE_BIN = os.path.join(PLUGIN_DIR, "rhvoice", "bin", "RHVoice-test")
+RHVOICE_LIB = os.path.join(PLUGIN_DIR, "rhvoice", "lib")
 SCREEN_W, SCREEN_H = 1280, 800
 
 piper_env_base = {
@@ -142,6 +144,7 @@ def apply_filters(img, cfg):
 
 _piper_proc = None
 _piper_lock = threading.Lock()
+_rhvoice_lock = threading.Lock()
 
 def start_piper(cfg):
     global _piper_proc
@@ -202,6 +205,34 @@ def speak(text, cfg):
         except Exception as e:
             print(f"❌ Piper write error: {e}", file=sys.stderr)
             _piper_proc = None
+
+def speak_rhvoice(text, cfg):
+    """RHVoice синтез — голоси 5,6,7,8"""
+    with _rhvoice_lock:
+        try:
+            rhvoice_speakers = {5: "Anatol", 6: "Volodymyr", 7: "Natalia", 8: "Marianna"}
+            voice = rhvoice_speakers.get(cfg.get("tts_speaker", 5), "Anatol")
+            rate = str(int(cfg.get("tts_speed", 1.0) * 130))
+            wav_file = "/tmp/rhvoice_out.wav"
+
+            with open("/tmp/rhvoice_in.txt", "w") as f:
+                f.write(text)
+
+            env = dict(piper_env_base)
+            env["LD_LIBRARY_PATH"] = RHVOICE_LIB
+
+            # Спочатку синтез у WAV файл
+            subprocess.run(
+                [RHVOICE_BIN, "-p", voice, "-r", rate, "-i", "/tmp/rhvoice_in.txt", "-o", wav_file],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            # Потім відтворення готового файлу
+            subprocess.run(
+                ["aplay", wav_file],
+                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except Exception as e:
+            print(f"❌ RHVoice error: {e}", file=sys.stderr, flush=True)
 
 def take_screenshot(cfg):
     w = cfg["width"]; h = cfg["height"]; ob = cfg["offset_bottom"]
@@ -276,7 +307,10 @@ def main():
                     test_text = f.read().strip()
                 os.remove(test_file)
                 if test_text:
-                    speak(test_text, cfg)
+                    if cfg.get("tts_speaker", 1) in [5, 6, 7, 8]:
+                        speak_rhvoice(test_text, cfg)
+                    else:
+                        speak(test_text, cfg)
             except: pass
 
         # 2. SCREENSHOT
@@ -328,7 +362,10 @@ def main():
             last_text = new_text
             tts_text = trim_incomplete_word(speak_text)
             if tts_text:
-                speak(tts_text, cfg)
+                if cfg.get("tts_speaker", 1) in [5, 6, 7, 8]:
+                    speak_rhvoice(tts_text, cfg)
+                else:
+                    speak(tts_text, cfg)
                 t_tts_ms = (time.monotonic() - t_tts) * 1000
                 print(f"{BLUE}TTS: {t_tts_ms:.0f}мс → \"{tts_text}\"{RESET}", flush=True)
             else:

@@ -720,17 +720,21 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         <PanelSectionRow>
           <div style={{ width: "100%" }}>
             <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "4px" }}>Голос:</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "4px" }}>
               {[
-                {v: 1, l: "Микита", icon: "👨"},
-                {v: 0, l: "Лада", icon: "👩"},
-                {v: 2, l: "Тетяна", icon: "👩"},
-                {v: 4, l: "Даринка", icon: "🧒"},
-              ].map(({v, l, icon}) => (
-                <button key={v} onClick={() => setTtsSpeaker(v)} style={{
+                {v: 1, l: "Микита", icon: "👨", cat: "Piper"},
+                {v: 0, l: "Лада", icon: "👩", cat: "Piper"},
+                {v: 2, l: "Тетяна", icon: "👩", cat: "Piper"},
+                {v: 4, l: "Даринка", icon: "🧒", cat: "Piper"},
+                {v: 5, l: "Anatol", icon: "👨", cat: "RHVoice"},
+                {v: 6, l: "Volodymyr", icon: "👨", cat: "RHVoice"},
+                {v: 7, l: "Natalia", icon: "👩", cat: "RHVoice"},
+                {v: 8, l: "Marianna", icon: "👩", cat: "RHVoice"},
+              ].map(({v, l, icon, cat}) => (
+                <button key={v} onClick={() => setTtsSpeaker(v)} title={cat} style={{
                   padding: "8px 4px", borderRadius: "4px", border: "none",
                   backgroundColor: ttsSpeaker === v ? "#1a9fff" : "#2a3140",
-                  color: "#fff", fontSize: "12px", cursor: "pointer",
+                  color: "#fff", fontSize: "11px", cursor: "pointer",
                 }}>{icon} {l}</button>
               ))}
             </div>
@@ -742,7 +746,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           <SliderField
             label={`Швидкість: ${ttsSpeed.toFixed(1)}x`}
             value={Math.round(ttsSpeed * 10)}
-            min={5} max={15} step={1}
+            min={5} max={25} step={1}
             onChange={(v: number) => setTtsSpeed(v / 10)}
           />
         </PanelSectionRow>
@@ -757,7 +761,8 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           />
         </PanelSectionRow>
 
-        {/* Варіативність голосу */}
+        {/* Варіативність голосу — тільки для Piper */}
+        {![5, 6, 7, 8].includes(ttsSpeaker) && (
         <PanelSectionRow>
           <SliderField
             label={`Живість голосу: ${ttsNoiseScale}%`}
@@ -771,8 +776,10 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
              "Емоційний"}
           </div>
         </PanelSectionRow>
+        )}
 
-        {/* Енергія дихання */}
+        {/* Енергія дихання — тільки для Piper */}
+        {![5, 6, 7, 8].includes(ttsSpeaker) && (
         <PanelSectionRow>
           <SliderField
             label={`Дихання: ${ttsNoiseW}%`}
@@ -786,6 +793,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
              "М'який"}
           </div>
         </PanelSectionRow>
+        )}
 
         {/* Зберегти */}
         <PanelSectionRow>
