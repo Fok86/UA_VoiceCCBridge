@@ -1,128 +1,128 @@
 <div align="center">
 
-![UA Voice CC Bridge](assets/banner.png)
+<img src="assets/banner.png" alt="UA Voice CC Bridge" width="100%"/>
 
-### Плагін для Steam Deck який озвучує субтитри в іграх українською мовою 🇺🇦
+# UA Voice CC Bridge
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Steam%20Deck-1a9fff?style=for-the-badge&logo=steam)](https://www.steamdeck.com/)
-[![Decky Loader](https://img.shields.io/badge/Requires-Decky%20Loader-blue?style=for-the-badge)](https://github.com/SteamDeckHomebrew/decky-loader)
-[![Language](https://img.shields.io/badge/🇺🇦-Ukrainian%20TTS-ffd700?style=for-the-badge)](#)
+**Плагін для Steam Deck який озвучує субтитри українською мовою**
+
+[![Version](https://img.shields.io/badge/version-1.0.7-blue?style=for-the-badge)](https://github.com/Fok86/UA_VoiceCCBridge/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Steam%20Deck-1a9fff?style=for-the-badge&logo=steam)](https://store.steampowered.com/steamdeck)
+[![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
+[![Decky](https://img.shields.io/badge/Decky%20Loader-required-orange?style=for-the-badge)](https://github.com/SteamDeckHomebrew/decky-loader)
 
 </div>
 
 ---
 
+> ⚠️ **Важливо:** Плагін **не робить переклад**! Він лише зчитує та озвучує субтитри які вже є в грі. Гра повинна мати вбудовані українські субтитри.
+
 ## ⚡ Як це працює
 
-Плагін робить знімок зони субтитрів, розпізнає текст через OCR і миттєво озвучує його.
-
 ```
-Знімок екрану → OCR (Tesseract) → Синтез мови (Piper) → Звук
-    ~200мс           ~100мс              ~160мс
+Знімок екрану → OCR (Tesseract) → Синтез мови (Piper / RHVoice) → Звук
+    ~200мс           ~100мс                  ~160мс
 ```
-
-> **Загальна затримка: ~300мс** від появи субтитрів до озвучення
+> Загальна затримка від появи субтитрів до озвучення: **~300мс**
 
 ---
 
-## 🎮 Можливості
+## ✨ Можливості
 
-| Функція | Опис |
-|--------|------|
-| 🎯 **OCR** | Розпізнавання субтитрів в будь-якій грі |
-| 🔊 **TTS** | Синтез мови українською — 3 голоси: Микита, Лада, Тетяна |
-| ⌨️ **Друкарська машинка** | Озвучення по мірі появи тексту |
-| 👁️ **Превью** | Перегляд зображення з фільтрами в реальному часі |
-| 🎛️ **Налаштування** | Зона субтитрів, фільтри, OCR інтервал, швидкість і гучність голосу |
+| | |
+|---|---|
+| 🎯 | Розпізнавання субтитрів в будь-якій грі |
+| 🔊 | **8 голосів** українською (Piper + RHVoice) |
+| 🎮 | Профілі налаштувань для кожної гри окремо |
+| ⌨️ | Режим "Друкарська машинка" |
+| 🎛️ | Повне налаштування зони, фільтрів, OCR і TTS |
+| 👁️ | Превью в реальному часі |
 
 ---
 
-## ⚠️ Важливо
+## 🔊 Голоси
 
-> Плагін **НЕ робить переклад**. Він лише озвучує субтитри які вже є в грі.
-> Гра повинна мати **вбудовану українську локалізацію** — інакше плагін буде читати текст іншою мовою або не працювати коректно.
+<table>
+<tr>
+<td width="50%">
+
+### 🧠 Piper (нейронний синтез)
+| Голос | Тип |
+|-------|-----|
+| 👨 Микита | чоловічий |
+| 👩 Лада | жіночий |
+| 👩 Тетяна | жіночий |
+| 🧒 Даринка | дитячий |
+
+</td>
+<td width="50%">
+
+### ⚡ RHVoice (легкий синтез)
+| Голос | Тип |
+|-------|-----|
+| 👨 Anatol | чоловічий |
+| 👨 Volodymyr | чоловічий |
+| 👩 Natalia | жіночий |
+| 👩 Marianna | жіночий |
+
+</td>
+</tr>
+</table>
+
+> 💡 **RHVoice** споживає значно менше ресурсів CPU — **не краде FPS у важких іграх!**
 
 ---
 
 ## 📦 Встановлення
 
-1. Встановіть [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) на Steam Deck
-2. Завантажте [останній реліз](../../releases/latest) плагіна
-3. Скопіюйте папку `UA_VoiceCCBridge` в `/home/deck/homebrew/plugins/`
-4. Перезапустіть Decky Loader
+**1.** Завантаж zip з **[Releases](https://github.com/Fok86/UA_VoiceCCBridge/releases/latest)**
+
+**2.** Розпакуй в `/home/deck/homebrew/plugins/`
+
+**3.** Перезапусти Decky:
+```bash
+sudo systemctl restart plugin_loader
+```
 
 ---
 
-## 🕹️ Використання
+## 🚀 Перший запуск
 
-1. Відкрийте меню Decky (кнопка `···` на Steam Deck)
-2. Знайдіть **UA Voice CC Bridge**
-3. Налаштуйте **Зону субтитрів** через відповідне меню
-4. Увімкніть **Активація воркера**
-5. Грайте з озвученими субтитрами! 🎮
-
----
-
-## ⚙️ Налаштування
-
-<details>
-<summary><b>🖼️ Зона субтитрів</b></summary>
-
-Вкажіть де на екрані знаходяться субтитри. Кнопка **Зробити знімок** допоможе перевірити правильність зони.
-
-</details>
-
-<details>
-<summary><b>🎨 Фільтри зображення</b></summary>
-
-Налаштуйте контраст, яскравість та кольоровий фільтр для кращого розпізнавання тексту.
-
-</details>
-
-<details>
-<summary><b>🔍 OCR</b></summary>
-
-- **Інтервал** — як часто робити знімок (мс)
-- **Мін. довжина** — мінімальна кількість символів для озвучення
-
-</details>
-
-<details>
-<summary><b>🗣️ TTS (Синтез мови)</b></summary>
-
-- **Голос** — Lada / Mykyta (за замовчуванням) / Tetiana
-- **Швидкість** — швидкість читання
-- **Гучність** — гучність голосу
-
-</details>
+```
+1. Запусти гру з українськими субтитрами
+2. Плагін → "Зона субтитрів" → Зробити знімок → Зберегти
+3. "Фільтри зображення" → Вибери колір субтитрів → Зберегти  
+4. "OCR" → Тест OCR → перевір розпізнавання
+5. "Синтез мови" → Вибери голос → Тест → Зберегти
+✅ Готово!
+```
 
 ---
 
-## 🔧 Технічний стек
+## 🛠️ Технічні деталі
 
 | Компонент | Технологія |
-|-----------|------------|
-| OCR | [Tesseract](https://github.com/tesseract-ocr/tesseract) + [tesserocr](https://github.com/sirfz/tesserocr) |
-| TTS | [Piper](https://github.com/rhasspy/piper) + [ukrainian-tts](https://github.com/robinhad/ukrainian-tts) |
-| Capture | GStreamer + PipeWire |
+|-----------|-----------|
+| OCR | [Tesseract 5](https://github.com/tesseract-ocr/tesseract) + [tesserocr](https://github.com/sirfz/tesserocr) |
+| TTS (Piper) | [Piper](https://github.com/rhasspy/piper) + [ukrainian-tts](https://github.com/robinhad/ukrainian-tts) |
+| TTS (RHVoice) | [RHVoice](https://github.com/RHVoice/RHVoice) |
+| EQ | SoX — Sound eXchange |
+| Знімок | GStreamer + PipeWire |
 | UI | React + Decky Loader SDK |
 
 ---
 
-## ☕ Підтримати проєкт
+## 💙 Підтримати проєкт
 
 <div align="center">
 
-![pixel art](assets/pixel_ua.png)
+**Якщо плагін корисний — підтримай розробку!**
 
-Якщо плагін корисний — підтримай розробку!
+🏦 **Monobank:** [send.monobank.ua/jar/7oNtZZsgCb](https://send.monobank.ua/jar/7oNtZZsgCb)
 
-**Monobank:** [send.monobank.ua/jar/7oNtZZsgCb](https://send.monobank.ua/jar/7oNtZZsgCb)
+💳 **Картка:** `4874 1000 2613 9066`
 
-💳 `4874 1000 2613 9066`
-
-[![QR донат](https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=https://send.monobank.ua/jar/7oNtZZsgCb)](https://send.monobank.ua/jar/7oNtZZsgCb)
+![QR донат](https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https://send.monobank.ua/jar/7oNtZZsgCb)
 
 </div>
 
@@ -130,8 +130,6 @@
 
 <div align="center">
 
-Зроблено з ❤️ для українських гравців
-
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+MIT License • Зроблено з ❤️ для українських гравців
 
 </div>
