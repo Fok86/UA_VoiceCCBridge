@@ -33,6 +33,9 @@ MODEL       = os.path.join(PIPER_DIR, "uk_UA-ukrainian_tts-medium.onnx")
 MODEL_LADA  = os.path.join(PIPER_DIR, "uk_UA-lada-x_low.onnx")
 RHVOICE_BIN = os.path.join(PLUGIN_DIR, "rhvoice", "bin", "RHVoice-test")
 RHVOICE_LIB = os.path.join(PLUGIN_DIR, "rhvoice", "lib")
+SOX_BIN     = os.path.join(PLUGIN_DIR, "sox", "bin", "sox")
+SOX_LIB     = os.path.join(PLUGIN_DIR, "sox", "lib")
+EQ_CONFIG   = os.path.join(PLUGIN_DIR, "eq_config.json")
 SCREEN_W, SCREEN_H = 1280, 800
 
 piper_env_base = {
@@ -206,6 +209,13 @@ def speak(text, cfg):
             print(f"❌ Piper write error: {e}", file=sys.stderr)
             _piper_proc = None
 
+def load_eq_config():
+    try:
+        with open(EQ_CONFIG) as f:
+            return json.load(f)
+    except:
+        return {}
+
 def speak_rhvoice(text, cfg):
     """RHVoice синтез — голоси 5,6,7,8"""
     with _rhvoice_lock:
@@ -213,24 +223,59 @@ def speak_rhvoice(text, cfg):
             rhvoice_speakers = {5: "Anatol", 6: "Volodymyr", 7: "Natalia", 8: "Marianna"}
             voice = rhvoice_speakers.get(cfg.get("tts_speaker", 5), "Anatol")
             rate = str(int(cfg.get("tts_speed", 1.0) * 130))
-            wav_file = "/tmp/rhvoice_out.wav"
 
             with open("/tmp/rhvoice_in.txt", "w") as f:
                 f.write(text)
 
             env = dict(piper_env_base)
-            env["LD_LIBRARY_PATH"] = RHVOICE_LIB
+            env["LD_LIBRARY_PATH"] = f"{RHVOICE_LIB}:{SOX_LIB}"
+            env["RHVOICE_DATA_PATH"] = os.path.join(PLUGIN_DIR, "rhvoice", "data")
 
-            # Спочатку синтез у WAV файл
+            # Синтез у RAW WAV
             subprocess.run(
-                [RHVOICE_BIN, "-p", voice, "-r", rate, "-i", "/tmp/rhvoice_in.txt", "-o", wav_file],
+                [RHVOICE_BIN, "-p", voice, "-r", rate, "-i", "/tmp/rhvoice_in.txt", "-o", "/tmp/rhvoice_raw.wav"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            # Потім відтворення готового файлу
+
+            # Будуємо Sox команду з eq_config.json
+            eq = load_eq_config()
+            sox_cmd = [SOX_BIN, "/tmp/rhvoice_raw.wav", "/tmp/rhvoice_out.wav"]
+
+            if eq.get("fade", 0) > 0:
+                sox_cmd += ["fade", str(eq["fade"])]
+            if eq.get("highpass"):
+                sox_cmd += ["highpass", str(eq["highpass"])]
+            if eq.get("lowpass"):
+                sox_cmd += ["lowpass", str(eq["lowpass"])]
+            if eq.get("eq1_freq"):
+                sox_cmd += ["equalizer", str(eq["eq1_freq"]), f"{eq.get('eq1_bw', 1.0)}q", str(eq.get("eq1_gain", 0))]
+            if eq.get("eq2_freq"):
+                sox_cmd += ["equalizer", str(eq["eq2_freq"]), f"{eq.get('eq2_bw', 1.0)}q", str(eq.get("eq2_gain", 0))]
+            if eq.get("eq3_freq"):
+                sox_cmd += ["equalizer", str(eq["eq3_freq"]), f"{eq.get('eq3_bw', 1.0)}q", str(eq.get("eq3_gain", 0))]
+            if eq.get("deesser_freq"):
+                sox_cmd += ["equalizer", str(eq["deesser_freq"]), "1.0q", str(eq.get("deesser_gain", 0))]
+            if eq.get("chorus_enabled", 0):
+                sox_cmd += ["chorus",
+                    str(eq.get("chorus_gain_in", 0.7)),
+                    str(eq.get("chorus_gain_out", 0.9)),
+                    str(eq.get("chorus_delay", 50)),
+                    str(eq.get("chorus_decay", 0.4)),
+                    str(eq.get("chorus_speed", 0.3)),
+                    str(eq.get("chorus_depth", 2.0)),
+                    "-s"
+                ]
+            if eq.get("volume", 1.0) != 1.0:
+                sox_cmd += ["vol", str(eq.get("volume", 1.0))]
+
+            subprocess.run(sox_cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Відтворення
             subprocess.run(
-                ["aplay", wav_file],
+                ["aplay", "/tmp/rhvoice_out.wav"],
                 env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
+
         except Exception as e:
             print(f"❌ RHVoice error: {e}", file=sys.stderr, flush=True)
 
@@ -363,7 +408,7 @@ def main():
             tts_text = trim_incomplete_word(speak_text)
             if tts_text:
                 if cfg.get("tts_speaker", 1) in [5, 6, 7, 8]:
-                    speak_rhvoice(tts_text, cfg)
+                    threading.Thread(target=speak_rhvoice, args=(tts_text, cfg), daemon=True).start()
                 else:
                     speak(tts_text, cfg)
                 t_tts_ms = (time.monotonic() - t_tts) * 1000

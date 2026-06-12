@@ -616,7 +616,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
             <SliderField
               label={`Поріг схожості: ${typewriterThreshold}%`}
               value={typewriterThreshold}
-              min={60} max={100} step={10}
+              min={20} max={100} step={5}
               onChange={(v: number) => setTypewriterThreshold(v)}
             />
             <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
@@ -746,7 +746,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           <SliderField
             label={`Швидкість: ${ttsSpeed.toFixed(1)}x`}
             value={Math.round(ttsSpeed * 10)}
-            min={5} max={25} step={1}
+            min={5} max={15} step={1}
             onChange={(v: number) => setTtsSpeed(v / 10)}
           />
         </PanelSectionRow>

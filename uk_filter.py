@@ -47,7 +47,8 @@ def is_weird(word):
     if not any(c in ALL_LETTERS for c in word): return True
     non = [c for c in word if c not in ALL_LETTERS and not c.isdigit()]
     if len(set(non)) >= 3: return True
-    if re.search(r'([а-яА-ЯіІїЇєЄa-zA-Z0-9])\1{2,}', word): return True
+    if re.search(r'([а-яА-ЯіІїЇєЄa-zA-Z])\1{2,}', word):
+        return len(word) <= 2  # Дозволяємо повторення двох літер, а не трьох
     if len(re.findall(r'[а-яА-ЯіІїЇєЄa-zA-Z]\d', word)) >= 3: return True
     vp = ''.join(UA_VOWELS) + 'aeiouAEIOU'
     if re.search(rf'[{re.escape(vp)}]{{4,}}', word): return True
@@ -56,8 +57,8 @@ def is_weird(word):
     clean = word.strip(".,!?:;-'\"")
     if len(clean) <= 2 and not all(c in ALL_LETTERS for c in clean): return True
     if re.match(r'^[ьЬ]', word): return True
-    if len(word) >= 3 and word[0] in UA_CONS and word[1] in 'ьЬ' and word[2] in UA_CONS:
-        return True
+    # if len(word) >= 3 and word[0] in UA_CONS and word[1] in 'ьЬ' and word[2] in UA_CONS:
+    #     return True  # Дозволяємо закінчення "ця" без голосної
     return False
 
 # ── Контекстна заміна ─────────────────────────────────────────────────────────
@@ -78,12 +79,12 @@ def filter_text(text, cfg):
     text = re.sub(r'[!?.,]{2,}', '.', text)
     text = re.sub(r'[!?.,]{2,}', '.', text)  # багато знаків → одна крапка
     text = re.sub(r'^\W+', '', text)
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'\s+', ' ', text).strip()  # Прибираємо зайві пробіли, але залишаємо текст
     text = ctx_replace(text)
     words = text.split()
     # Очищаємо хвіст кожного слова від нелітерних символів
     def clean_word_tail(w):
-        m = re.match(r"([а-яА-ЯіІїЇєЄa-zA-Z']+)(.*)", w)
+        m = re.match(r"([а-яА-ЯіІїЇєЄa-zA-Z']+(?:-[а-яА-ЯіІїЇєЄa-zA-Z']+)*)(.*)", w)
         if not m:
             return w
         letters = m.group(1)
@@ -110,12 +111,13 @@ def filter_text(text, cfg):
                 return ""
 
     if len(words) > 2:
-        single = sum(1 for w in good_words if len(w.strip('.,!?:;-')) <= 1)
-        if len(good_words) > 3 and single / len(good_words) > 0.3:
+        single = sum(1 for w in good_words if len(w.strip('.,!?:;-')) <= 1 and w.strip('.,!?:;-').lower() not in SHORT_WORDS)
+        if len(good_words) > 3 and single / len(good_words) > 0.4:
             return ""
 
     text = ' '.join(good_words)
     text = re.sub(r'(?<!\w)[-*_=+](?!\w)', '', text)
+    text = re.sub(r'(?<=\w)-(?=\w)', r'\-', text)  # Дозволяємо одинарний дефіс всередині слова
     text = re.sub(r'\s+', ' ', text).strip()
     if len(text) < int(cfg.get('ocr_min_len', 3)):
         return ""
