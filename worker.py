@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, sys, json, time, subprocess, signal, threading
+import os, sys, json, time, subprocess, signal, threading, re
 
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -66,11 +66,12 @@ def load_config():
         "outline_filter": False, "outline_hmin": 0, "outline_hmax": 255,
         "outline_radius": 3, "outline_dark": 80,
         "ocr_interval": 1000, "ocr_min_len": 3, "ocr_ignore_words": "",
-        "ocr_psm": 6, "ocr_similarity": 80, "ocr_min_xheight": 10,
+        "ocr_psm": 6, "ocr_similarity": 80, "ocr_min_xheight": 10, "ocr_ignore_char_names": True,
         "typewriter_mode": False, "typewriter_threshold": 80,
         "tts_speaker": 1, "tts_speed": 0.8,
         "tts_cpu_idle": True, "tts_omp_threads": 1, "tts_nice": 0,
         "tts_malloc_arena": False, "tts_malloc_mmap": False,
+        "gender_detect": False, "tts_speaker_male": 5, "tts_speaker_female": 7,
     }
     try:
         with open(CONFIG_PATH) as f:
@@ -146,12 +147,14 @@ def apply_filters(img, cfg):
     return img
 
 _piper_proc = None
+_piper_speaker = None  # speaker з яким запущено поточний Piper-процес
 _piper_lock = threading.Lock()
 _rhvoice_lock = threading.Lock()
 
 def start_piper(cfg):
-    global _piper_proc
+    global _piper_proc, _piper_speaker
     speaker = int(cfg.get("tts_speaker", 1))
+    _piper_speaker = speaker
     speed = float(cfg.get("tts_speed", 1.0))
     noise_scale = float(cfg.get("tts_noise_scale", 0.667))
     noise_w = float(cfg.get("tts_noise_w", 0.8))
@@ -198,9 +201,18 @@ def start_piper(cfg):
     print("✅ Piper запущено", flush=True)
 
 def speak(text, cfg):
-    global _piper_proc
+    global _piper_proc, _piper_speaker
     with _piper_lock:
-        if _piper_proc is None or _piper_proc.poll() is not None:
+        want_speaker = int(cfg.get("tts_speaker", 1))
+        # Перезапуск якщо процес мертвий АБО змінився голос (для gender-режиму)
+        if (_piper_proc is None or _piper_proc.poll() is not None
+                or _piper_speaker != want_speaker):
+            if _piper_proc is not None and _piper_proc.poll() is None:
+                try:
+                    _piper_proc.stdin.close()
+                    _piper_proc.terminate()
+                except Exception:
+                    pass
             start_piper(cfg)
         try:
             _piper_proc.stdin.write((text + "\n").encode("utf-8"))
@@ -279,14 +291,31 @@ def speak_rhvoice(text, cfg):
         except Exception as e:
             print(f"❌ RHVoice error: {e}", file=sys.stderr, flush=True)
 
+def get_gamescope_id():
+    """Знаходить PipeWire node ID для gamescope"""
+    try:
+        out = subprocess.check_output(["pw-cli", "list-objects"], stderr=subprocess.DEVNULL).decode()
+        # Шукаємо: "id 93, type PipeWire:Interface:Node" перед "node.name = "gamescope""
+        blocks = out.split('\n\n')
+        for block in blocks:
+            if 'node.name = "gamescope"' in block and 'Video/Source' in block:
+                m = re.search(r'id (\d+),\s*type PipeWire:Interface:Node', block)
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return None
+
 def take_screenshot(cfg):
     w = cfg["width"]; h = cfg["height"]; ob = cfg["offset_bottom"]
     l = (SCREEN_W - w) // 2; r = (SCREEN_W - w) // 2
     top = SCREEN_H - ob - h; bot = ob
     tmp = "/dev/shm/ua_tmp.png"; final = "/dev/shm/deck_bottom.png"
+    gscope_id = get_gamescope_id()
+    src_args = ["pipewiresrc", f"target-object={gscope_id}", "num-buffers=1"] if gscope_id else ["pipewiresrc", "num-buffers=1"]
     try:
         subprocess.run([
-            "gst-launch-1.0", "pipewiresrc", "num-buffers=1", "!",
+            "gst-launch-1.0", *src_args, "!",
             "videoconvert", "!", "videocrop",
             f"top={top}", f"bottom={bot}", f"left={l}", f"right={r}", "!",
             "pngenc", "snapshot=true", "!", "filesink", f"location={tmp}"
@@ -376,6 +405,7 @@ def main():
             ocr_api.SetImage(img.convert("L"))
             ocr_api.SetVariable("textord_min_xheight", str(int(cfg.get("ocr_min_xheight", 10))))
             raw = ocr_api.GetUTF8Text().strip()
+            print(f"RAW: {raw!r}", flush=True)
             new_text = filter_text(raw, cfg)
             t_ocr_ms = (time.monotonic() - t_ocr) * 1000
             
@@ -407,12 +437,32 @@ def main():
             last_text = new_text
             tts_text = trim_incomplete_word(speak_text)
             if tts_text:
-                if cfg.get("tts_speaker", 1) in [5, 6, 7, 8]:
-                    threading.Thread(target=speak_rhvoice, args=(tts_text, cfg), daemon=True).start()
+                tts_cfg = cfg
+                # Гендер-детекція: підміна голосу за тегом [F]/[M]
+                if cfg.get("gender_detect", False):
+                    if tts_text.startswith("[F]"):
+                        tts_cfg = dict(cfg)
+                        tts_cfg["tts_speaker"] = cfg.get("tts_speaker_female", 7)
+                        tts_text = tts_text[3:]
+                    elif tts_text.startswith("[M]"):
+                        tts_cfg = dict(cfg)
+                        tts_cfg["tts_speaker"] = cfg.get("tts_speaker_male", 5)
+                        tts_text = tts_text[3:]
+                # Якщо детекція вимкнена — прибираємо теги якщо вони є
+                elif tts_text.startswith("[F]") or tts_text.startswith("[M]"):
+                    tts_text = tts_text[3:]
+
+                if tts_cfg.get("tts_speaker", 1) in [5, 6, 7, 8]:
+                    threading.Thread(target=speak_rhvoice, args=(tts_text, tts_cfg), daemon=True).start()
                 else:
-                    speak(tts_text, cfg)
+                    speak(tts_text, tts_cfg)
                 t_tts_ms = (time.monotonic() - t_tts) * 1000
-                print(f"{BLUE}TTS: {t_tts_ms:.0f}мс → \"{tts_text}\"{RESET}", flush=True)
+                spk = tts_cfg.get("tts_speaker", 1)
+                gender_log = f" [♀ spk={spk}]" if spk == cfg.get("tts_speaker_female") else f" [♂ spk={spk}]" if spk == cfg.get("tts_speaker_male") else f" [spk={spk}]"
+                # Витягуємо ім'я персонажа з оригінального raw тексту для логу
+                _m = re.match(r"^([А-ЯІЇЄа-яієї][А-ЯІЇЄа-яієї'ʼ\s]{0,40}?)\s*[:,]\s*", raw or "")
+                char_log = f" [{_m.group(1).strip()}]" if _m else ""
+                print(f"{BLUE}TTS: {t_tts_ms:.0f}мс{gender_log}{char_log} → \"{tts_text}\"{RESET}", flush=True)
             else:
                 pass  # текст обрізаний, нічого не пишемо
         else:

@@ -215,8 +215,12 @@ var plugin_export = (function () {
         const [typewriterMode, setTypewriterMode] = SP_REACT.useState(false);
         const [typewriterThreshold, setTypewriterThreshold] = SP_REACT.useState(80);
         const [ocrSimilarity, setOcrSimilarity] = SP_REACT.useState(80);
+        const [ocrIgnoreCharNames, setOcrIgnoreCharNames] = SP_REACT.useState(true);
         // TTS
         const [ttsSpeaker, setTtsSpeaker] = SP_REACT.useState(1);
+        const [genderDetect, setGenderDetect] = SP_REACT.useState(false);
+        const [ttsSpeakerMale, setTtsSpeakerMale] = SP_REACT.useState(5);
+        const [ttsSpeakerFemale, setTtsSpeakerFemale] = SP_REACT.useState(7);
         const [ttsSpeed, setTtsSpeed] = SP_REACT.useState(1.0);
         const [ttsVolume, setTtsVolume] = SP_REACT.useState(100);
         const [ttsNoiseScale, setTtsNoiseScale] = SP_REACT.useState(67); // 0.667 * 100
@@ -343,6 +347,9 @@ var plugin_export = (function () {
             if (res.success && res.result.success) {
                 const z = res.result.zone;
                 setTtsSpeaker(z.tts_speaker ?? 1);
+                setGenderDetect(z.gender_detect ?? false);
+                setTtsSpeakerMale(z.tts_speaker_male ?? 5);
+                setTtsSpeakerFemale(z.tts_speaker_female ?? 7);
                 setTtsSpeed(z.tts_speed ?? 1.0);
                 setTtsVolume(z.tts_volume ?? 100);
                 setTtsNoiseScale(Math.round((z.tts_noise_scale ?? 0.667) * 100));
@@ -366,6 +373,7 @@ var plugin_export = (function () {
                 setTypewriterMode(z.typewriter_mode || false);
                 setTypewriterThreshold(z.typewriter_threshold || 80);
                 setOcrSimilarity(z.ocr_similarity ?? 80);
+                setOcrIgnoreCharNames(z.ocr_ignore_char_names !== false);
             }
         };
         const saveZone = async () => {
@@ -552,6 +560,8 @@ var plugin_export = (function () {
                             ocrSimilarity <= 80 ? "Збалансований" :
                                 "Слабкий — більше повторів")),
                 SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(ToggleField, { label: "\u0406\u0433\u043D\u043E\u0440\u0443\u0432\u0430\u0442\u0438 \u0456\u043C\u0435\u043D\u0430 \u043F\u0435\u0440\u0441\u043E\u043D\u0430\u0436\u0456\u0432", checked: ocrIgnoreCharNames, onChange: (v) => setOcrIgnoreCharNames(v) })),
+                SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement("div", { style: { width: "100%" } },
                         SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "4px" } }, "\u0406\u0433\u043D\u043E\u0440\u0443\u0432\u0430\u0442\u0438 \u0441\u043B\u043E\u0432\u0430 (\u0447\u0435\u0440\u0435\u0437 \u043A\u043E\u043C\u0443):"),
                         SP_REACT.createElement("input", { type: "text", value: ocrIgnoreWords, onChange: (e) => setOcrIgnoreWords(e.target.value), onFocus: () => {
@@ -602,6 +612,7 @@ var plugin_export = (function () {
                                 psm: ocrPsm,
                                 oem: ocrOem,
                                 similarity: ocrSimilarity,
+                                ignore_char_names: ocrIgnoreCharNames,
                             });
                             await serverApi.callPluginMethod("save_typewriter_settings", {
                                 enabled: typewriterMode,
@@ -640,40 +651,78 @@ var plugin_export = (function () {
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement("div", { style: { width: "100%" } },
                         SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "4px" } }, "\u0413\u043E\u043B\u043E\u0441:"),
-                        SP_REACT.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px" } }, [
-                            { v: 1, l: "Микита", icon: "👨" },
-                            { v: 0, l: "Лада", icon: "👩" },
-                            { v: 2, l: "Тетяна", icon: "👩" },
-                            { v: 4, l: "Даринка", icon: "🧒" },
-                        ].map(({ v, l, icon }) => (SP_REACT.createElement("button", { key: v, onClick: () => setTtsSpeaker(v), style: {
+                        SP_REACT.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "4px" } }, [
+                            { v: 1, l: "Микита", icon: "👨", cat: "Piper" },
+                            { v: 0, l: "Лада", icon: "👩", cat: "Piper" },
+                            { v: 2, l: "Тетяна", icon: "👩", cat: "Piper" },
+                            { v: 4, l: "Даринка", icon: "🧒", cat: "Piper" },
+                            { v: 5, l: "Anatol", icon: "👨", cat: "RHVoice" },
+                            { v: 6, l: "Volodymyr", icon: "👨", cat: "RHVoice" },
+                            { v: 7, l: "Natalia", icon: "👩", cat: "RHVoice" },
+                            { v: 8, l: "Marianna", icon: "👩", cat: "RHVoice" },
+                        ].map(({ v, l, icon, cat }) => (SP_REACT.createElement("button", { key: v, onClick: () => setTtsSpeaker(v), title: cat, style: {
                                 padding: "8px 4px", borderRadius: "4px", border: "none",
                                 backgroundColor: ttsSpeaker === v ? "#1a9fff" : "#2a3140",
-                                color: "#fff", fontSize: "12px", cursor: "pointer",
+                                color: "#fff", fontSize: "11px", cursor: "pointer",
                             } },
                             icon,
                             " ",
                             l)))))),
                 SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement(ToggleField, { label: "\uD83C\uDFAD \u0413\u0435\u043D\u0434\u0435\u0440 (\u0440\u0456\u0437\u043D\u0456 \u0433\u043E\u043B\u043E\u0441\u0438 \u0427/\u0416)", checked: genderDetect, onChange: (v) => setGenderDetect(v) })),
+                genderDetect && (SP_REACT.createElement(PanelSectionRow, null,
+                    SP_REACT.createElement("div", { style: { width: "100%" } },
+                        SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginBottom: "6px" } }, "\u26A1 \u0422\u0456\u043B\u044C\u043A\u0438 RHVoice \u2014 \u0448\u0432\u0438\u0434\u043A\u0435 \u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0435\u043D\u043D\u044F \u0431\u0435\u0437 \u0432\u0442\u0440\u0430\u0442\u0438 FPS"),
+                        SP_REACT.createElement("div", { style: { color: "#5b9fff", fontSize: "11px", marginBottom: "4px" } }, "\u2642 \u0427\u043E\u043B\u043E\u0432\u0456\u0447\u0438\u0439 \u0433\u043E\u043B\u043E\u0441:"),
+                        SP_REACT.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "4px", marginBottom: "8px" } }, [
+                            { v: 5, l: "Anatol", icon: "👨" },
+                            { v: 6, l: "Volodymyr", icon: "👨" },
+                        ].map(({ v, l, icon }) => (SP_REACT.createElement("button", { key: v, onClick: () => setTtsSpeakerMale(v), style: {
+                                padding: "8px 4px", borderRadius: "4px",
+                                border: ttsSpeakerMale === v ? "2px solid #1a9fff" : "2px solid transparent",
+                                backgroundColor: ttsSpeakerMale === v ? "#1a3a5a" : "#2a3140",
+                                color: "#fff", fontSize: "11px", cursor: "pointer",
+                            } },
+                            icon,
+                            " ",
+                            l)))),
+                        SP_REACT.createElement("div", { style: { color: "#ff8fc7", fontSize: "11px", marginBottom: "4px" } }, "\u2640 \u0416\u0456\u043D\u043E\u0447\u0438\u0439 \u0433\u043E\u043B\u043E\u0441:"),
+                        SP_REACT.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "4px" } }, [
+                            { v: 7, l: "Natalia", icon: "👩" },
+                            { v: 8, l: "Marianna", icon: "👩" },
+                        ].map(({ v, l, icon }) => (SP_REACT.createElement("button", { key: v, onClick: () => setTtsSpeakerFemale(v), style: {
+                                padding: "8px 4px", borderRadius: "4px",
+                                border: ttsSpeakerFemale === v ? "2px solid #ff69b4" : "2px solid transparent",
+                                backgroundColor: ttsSpeakerFemale === v ? "#5a2a45" : "#2a3140",
+                                color: "#fff", fontSize: "11px", cursor: "pointer",
+                            } },
+                            icon,
+                            " ",
+                            l))))))),
+                SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Швидкість: ${ttsSpeed.toFixed(1)}x`, value: Math.round(ttsSpeed * 10), min: 5, max: 15, step: 1, onChange: (v) => setTtsSpeed(v / 10) })),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Гучність: ${ttsVolume}%`, value: ttsVolume, min: 10, max: 100, step: 5, onChange: (v) => setTtsVolume(v) })),
-                SP_REACT.createElement(PanelSectionRow, null,
+                ![5, 6, 7, 8].includes(ttsSpeaker) && (SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Живість голосу: ${ttsNoiseScale}%`, value: ttsNoiseScale, min: 0, max: 100, step: 1, onChange: (v) => setTtsNoiseScale(v) }),
                     SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ttsNoiseScale <= 65 ? "Монотонний" :
                         ttsNoiseScale <= 75 ? "Природній (дефолт)" :
-                            "Емоційний")),
-                SP_REACT.createElement(PanelSectionRow, null,
+                            "Емоційний"))),
+                ![5, 6, 7, 8].includes(ttsSpeaker) && (SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(SliderField, { label: `Дихання: ${ttsNoiseW}%`, value: ttsNoiseW, min: 0, max: 100, step: 1, onChange: (v) => setTtsNoiseW(v) }),
                     SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "10px", marginTop: "2px" } }, ttsNoiseW <= 70 ? "Чіткий" :
                         ttsNoiseW <= 85 ? "Природній (дефолт)" :
-                            "М'який")),
+                            "М'який"))),
                 SP_REACT.createElement(PanelSectionRow, null,
                     SP_REACT.createElement(Button, { onClick: async () => {
                             await serverApi.callPluginMethod("save_tts_settings", {
                                 speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
                                 noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
-                                cpu_idle: ttsCpuIdle, omp_threads: ttsOmpThreads, nice: ttsNice,
-                                malloc_arena: ttsMallocArena, malloc_mmap: ttsMallocMmap,
+                            });
+                            await serverApi.callPluginMethod("save_gender_speakers", {
+                                gender_detect: genderDetect,
+                                speaker_male: ttsSpeakerMale,
+                                speaker_female: ttsSpeakerFemale,
                             });
                         }, style: { width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" } },
                         "\uD83D\uDCBE ",

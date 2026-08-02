@@ -135,9 +135,13 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [typewriterMode, setTypewriterMode] = useState(false);
   const [typewriterThreshold, setTypewriterThreshold] = useState(80);
   const [ocrSimilarity, setOcrSimilarity] = useState(80);
+  const [ocrIgnoreCharNames, setOcrIgnoreCharNames] = useState(true);
 
   // TTS
   const [ttsSpeaker, setTtsSpeaker] = useState(1);
+  const [genderDetect, setGenderDetect] = useState(false);
+  const [ttsSpeakerMale, setTtsSpeakerMale] = useState(5);
+  const [ttsSpeakerFemale, setTtsSpeakerFemale] = useState(7);
   const [ttsSpeed, setTtsSpeed] = useState(1.0);
   const [ttsVolume, setTtsVolume] = useState(100);
   const [ttsNoiseScale, setTtsNoiseScale] = useState(67);  // 0.667 * 100
@@ -254,6 +258,9 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     if (res.success && res.result.success) {
       const z = res.result.zone;
       setTtsSpeaker(z.tts_speaker ?? 1);
+      setGenderDetect(z.gender_detect ?? false);
+      setTtsSpeakerMale(z.tts_speaker_male ?? 5);
+      setTtsSpeakerFemale(z.tts_speaker_female ?? 7);
       setTtsSpeed(z.tts_speed ?? 1.0);
       setTtsVolume(z.tts_volume ?? 100);
       setTtsNoiseScale(Math.round((z.tts_noise_scale ?? 0.667) * 100));
@@ -278,6 +285,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
       setTypewriterMode(z.typewriter_mode || false);
       setTypewriterThreshold(z.typewriter_threshold || 80);
       setOcrSimilarity(z.ocr_similarity ?? 80);
+      setOcrIgnoreCharNames(z.ocr_ignore_char_names !== false);
     }
   };
 
@@ -575,6 +583,15 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           </div>
         </PanelSectionRow>
 
+        {/* Ігнорувати імена персонажів */}
+        <PanelSectionRow>
+          <ToggleField
+            label="Ігнорувати імена персонажів"
+            checked={ocrIgnoreCharNames}
+            onChange={(v: boolean) => setOcrIgnoreCharNames(v)}
+          />
+        </PanelSectionRow>
+
         {/* Ігнорувати слова */}
         <PanelSectionRow>
           <div style={{ width: "100%" }}>
@@ -616,7 +633,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
             <SliderField
               label={`Поріг схожості: ${typewriterThreshold}%`}
               value={typewriterThreshold}
-              min={20} max={100} step={5}
+              min={60} max={100} step={10}
               onChange={(v: number) => setTypewriterThreshold(v)}
             />
             <div style={{ color: "#8b929a", fontSize: "10px", marginTop: "2px" }}>
@@ -663,6 +680,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
               psm: ocrPsm,
               oem: ocrOem,
               similarity: ocrSimilarity,
+              ignore_char_names: ocrIgnoreCharNames,
             });
             await serverApi.callPluginMethod("save_typewriter_settings", {
               enabled: typewriterMode,
@@ -741,6 +759,53 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           </div>
         </PanelSectionRow>
 
+        {/* Гендер-детекція */}
+        <PanelSectionRow>
+          <ToggleField
+            label="🎭 Гендер (різні голоси Ч/Ж)"
+            checked={genderDetect}
+            onChange={(v: boolean) => setGenderDetect(v)}
+          />
+        </PanelSectionRow>
+
+        {genderDetect && (
+          <PanelSectionRow>
+            <div style={{ width: "100%" }}>
+              <div style={{ color: "#8b929a", fontSize: "10px", marginBottom: "6px" }}>
+                ⚡ Тільки RHVoice — швидке переключення без втрати FPS
+              </div>
+              <div style={{ color: "#5b9fff", fontSize: "11px", marginBottom: "4px" }}>♂ Чоловічий голос:</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "4px", marginBottom: "8px" }}>
+                {[
+                  {v: 5, l: "Anatol", icon: "👨"},
+                  {v: 6, l: "Volodymyr", icon: "👨"},
+                ].map(({v, l, icon}) => (
+                  <button key={v} onClick={() => setTtsSpeakerMale(v)} style={{
+                    padding: "8px 4px", borderRadius: "4px",
+                    border: ttsSpeakerMale === v ? "2px solid #1a9fff" : "2px solid transparent",
+                    backgroundColor: ttsSpeakerMale === v ? "#1a3a5a" : "#2a3140",
+                    color: "#fff", fontSize: "11px", cursor: "pointer",
+                  }}>{icon} {l}</button>
+                ))}
+              </div>
+              <div style={{ color: "#ff8fc7", fontSize: "11px", marginBottom: "4px" }}>♀ Жіночий голос:</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "4px" }}>
+                {[
+                  {v: 7, l: "Natalia", icon: "👩"},
+                  {v: 8, l: "Marianna", icon: "👩"},
+                ].map(({v, l, icon}) => (
+                  <button key={v} onClick={() => setTtsSpeakerFemale(v)} style={{
+                    padding: "8px 4px", borderRadius: "4px",
+                    border: ttsSpeakerFemale === v ? "2px solid #ff69b4" : "2px solid transparent",
+                    backgroundColor: ttsSpeakerFemale === v ? "#5a2a45" : "#2a3140",
+                    color: "#fff", fontSize: "11px", cursor: "pointer",
+                  }}>{icon} {l}</button>
+                ))}
+              </div>
+            </div>
+          </PanelSectionRow>
+        )}
+
         {/* Швидкість */}
         <PanelSectionRow>
           <SliderField
@@ -801,8 +866,11 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
             await serverApi.callPluginMethod("save_tts_settings", {
               speaker: ttsSpeaker, speed: ttsSpeed, volume: ttsVolume,
               noise_scale: ttsNoiseScale / 100, noise_w: ttsNoiseW / 100,
-              cpu_idle: ttsCpuIdle, omp_threads: ttsOmpThreads, nice: ttsNice,
-              malloc_arena: ttsMallocArena, malloc_mmap: ttsMallocMmap,
+            });
+            await serverApi.callPluginMethod("save_gender_speakers", {
+              gender_detect: genderDetect,
+              speaker_male: ttsSpeakerMale,
+              speaker_female: ttsSpeakerFemale,
             });
            
           }} style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>

@@ -10,12 +10,12 @@ import decky_plugin
 CONFIG_DIR  = "/home/deck/.config/ua_voice_plugin"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 PROFILES_DIR = os.path.join(CONFIG_DIR, "profiles")
-CACHE_DIR = os.path.join(CONFIG_DIR, "cache")
-CACHED_IMAGE = os.path.join(CACHE_DIR, "calibration_cached.png")
 SCREEN_W = 1280
 SCREEN_H = 800
 
+# ── Профілі ───────────────────────────────────────────────────────────────────
 def get_running_game():
+    """Повертає (appid, name) поточної запущеної гри або (None, None)"""
     try:
         for pid in os.listdir('/proc'):
             if not pid.isdigit():
@@ -47,45 +47,54 @@ def get_running_game():
 def get_profile_path(appid):
     return os.path.join(PROFILES_DIR, f"{appid}.json") if appid else None
 
-DEFAULTS = {
-    "offset_bottom": 50, "width": 900, "height": 80,
-    "bw": False, "contrast": 1.0, "brightness": 1.0,
-    "color_filter": "none", "hardness": 30,
-    "outline_filter": False, "outline_hmin": 0, "outline_hmax": 255,
-    "outline_radius": 3, "outline_dark": 80,
-    "ocr_interval": 1000, "ocr_min_len": 3, "ocr_ignore_words": "",
-    "ocr_psm": 6, "ocr_oem": 1, "ocr_similarity": 80, "ocr_min_xheight": 10,
-    "typewriter_mode": False, "typewriter_threshold": 80,
-    "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
-    "tts_cpu_idle": True, "tts_omp_threads": 1, "tts_nice": 0,
-    "tts_malloc_arena": False, "tts_malloc_mmap": False,
-    "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
-}
-
 def load_config(appid=None):
-    cfg = dict(DEFAULTS)
+    defaults = {
+        "offset_bottom": 50, "width": 900, "height": 80,
+        "bw": False, "contrast": 1.0, "brightness": 1.0,
+        "color_filter": "none", "hardness": 30,
+        "outline_filter": False, "outline_hmin": 0, "outline_hmax": 255,
+        "outline_radius": 3, "outline_dark": 80,
+        "ocr_interval": 1000, "ocr_min_len": 3, "ocr_ignore_words": "",
+        "ocr_psm": 6, "ocr_oem": 1, "ocr_similarity": 80, "ocr_min_xheight": 10, "ocr_ignore_char_names": True,
+        "typewriter_mode": False, "typewriter_threshold": 80,
+        "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
+        "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
+        "gender_detect": False, "tts_speaker_male": 5, "tts_speaker_female": 7,
+    }
+    # Профіль гри (якщо є) — НЕ глобальний конфіг!
     if appid:
         profile_path = get_profile_path(appid)
         if profile_path and os.path.exists(profile_path):
             try:
                 with open(profile_path) as f:
-                    cfg = {**cfg, **json.load(f)}
+                    defaults = {**defaults, **json.load(f)}
             except: pass
-    return cfg
+    return defaults
 
 def save_config(data: dict, appid=None):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     decky_plugin.logger.info(f"UA_LOG: save_config appid={appid} data={list(data.keys())}")
-    os.makedirs(PROFILES_DIR, exist_ok=True)
-    # Зберігаємо в профіль гри (або дефолтний якщо нема гри)
-    profile_path = get_profile_path(appid) if appid else CONFIG_PATH
-    current = load_config(appid)
-    current.update(data)
-    with open(profile_path, "w") as f:
-        json.dump(current, f)
-    # Оновлюємо CONFIG_PATH для worker.py
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(current, f)
+    if appid:
+        os.makedirs(PROFILES_DIR, exist_ok=True)
+        profile_path = get_profile_path(appid)
+        current = {}
+        if os.path.exists(profile_path):
+            try:
+                with open(profile_path) as f:
+                    current = json.load(f)
+            except: pass
+        current.update(data)
+        with open(profile_path, "w") as f:
+            json.dump(current, f)
+        # Записуємо злитий конфіг для worker.py
+        merged = load_config(appid)
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(merged, f)
+    else:
+        current = load_config()
+        current.update(data)
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(current, f)
 
 def calc_crop(cfg: dict):
     w = cfg["width"]; h = cfg["height"]; ob = cfg["offset_bottom"]
@@ -96,6 +105,7 @@ def calc_crop(cfg: dict):
     return {"top": top, "bottom": bottom, "left": left, "right": right}
 
 async def run_python3(script: str, *args) -> str:
+    """Запускає скрипт через системний Python 3.13"""
     plugin_dir = decky_plugin.DECKY_PLUGIN_DIR
     script_path = os.path.join(plugin_dir, script)
     proc = await asyncio.create_subprocess_exec(
@@ -119,11 +129,13 @@ class Plugin:
         return {"success": True, "zone": load_config(appid), "appid": appid}
 
     async def get_profiles(self):
+        """Список збережених профілів"""
         profiles = []
         if os.path.exists(PROFILES_DIR):
             for f in os.listdir(PROFILES_DIR):
                 if f.endswith(".json"):
                     appid = f.replace(".json", "")
+                    # Спробуємо знайти назву гри
                     acf = f"/home/deck/.local/share/Steam/steamapps/appmanifest_{appid}.acf"
                     name = f"Game_{appid}"
                     if os.path.exists(acf):
@@ -143,65 +155,67 @@ class Plugin:
 
     async def save_zone(self, offset_bottom: int, width: int, height: int):
         appid, _ = get_running_game()
+        if not appid:
+            return {"success": True}  # гра не запущена — не зберігаємо
         save_config({"offset_bottom": offset_bottom, "width": width, "height": height}, appid)
         return {"success": True}
 
     async def save_filters(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int,
                            outline_filter: bool = False, outline_hmin: int = 0, outline_hmax: int = 255,
-                           outline_radius: int = 3, outline_dark: int = 80, ocr_min_xheight: int = 10):
+                           outline_radius: int = 3, outline_dark: int = 80, outline_min_area: int = 20,
+                           ocr_min_xheight: int = 10):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"bw": bw, "contrast": contrast, "brightness": brightness,
                      "color_filter": color_filter, "hardness": hardness,
                      "outline_filter": outline_filter, "outline_hmin": outline_hmin,
                      "outline_hmax": outline_hmax, "outline_radius": outline_radius,
-                     "outline_dark": outline_dark, "ocr_min_xheight": ocr_min_xheight}, appid)
+                     "outline_dark": outline_dark, "outline_min_area": outline_min_area,
+                     "ocr_min_xheight": ocr_min_xheight}, appid)
         return {"success": True}
 
-    async def save_ocr_settings(self, interval: int, min_len: int, ignore_words: str, psm: int = 6, oem: int = 1, similarity: int = 80):
+    async def save_ocr_settings(self, interval: int, min_len: int, ignore_words: str, psm: int = 6, oem: int = 1, similarity: int = 80, ignore_char_names: bool = True):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"ocr_interval": interval, "ocr_min_len": min_len,
                      "ocr_ignore_words": ignore_words, "ocr_psm": psm, "ocr_oem": oem,
-                     "ocr_similarity": similarity}, appid)
+                     "ocr_similarity": similarity, "ocr_ignore_char_names": ignore_char_names}, appid)
         return {"success": True}
 
     async def save_typewriter_settings(self, enabled: bool, threshold: int):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"typewriter_mode": enabled, "typewriter_threshold": threshold}, appid)
         return {"success": True}
 
-    async def save_tts_settings(self, speaker: int, speed: float, volume: int, noise_scale: float = 0.667, noise_w: float = 0.8,
-                                cpu_idle: bool = True, omp_threads: int = 1, nice: int = 0,
-                                malloc_arena: bool = False, malloc_mmap: bool = False):
+    async def save_tts_settings(self, speaker: int, speed: float, volume: int, noise_scale: float = 0.667, noise_w: float = 0.8):
         appid, _ = get_running_game()
+        if not appid: return {"success": True}
         save_config({"tts_speaker": speaker, "tts_speed": speed, "tts_volume": volume,
-                     "tts_noise_scale": noise_scale, "tts_noise_w": noise_w,
-                     "tts_cpu_idle": cpu_idle, "tts_omp_threads": omp_threads, "tts_nice": nice,
-                     "tts_malloc_arena": malloc_arena, "tts_malloc_mmap": malloc_mmap}, appid)
+                     "tts_noise_scale": noise_scale, "tts_noise_w": noise_w}, appid)
+        return {"success": True}
+
+    async def save_gender_speakers(self, gender_detect: bool, speaker_male: int, speaker_female: int):
+        appid, _ = get_running_game()
+        if not appid: return {"success": True}
+        save_config({"gender_detect": gender_detect,
+                     "tts_speaker_male": speaker_male,
+                     "tts_speaker_female": speaker_female}, appid)
         return {"success": True}
 
     async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int,
                                    outline_filter: bool = False, outline_hmin: int = 0, outline_hmax: int = 255,
-                                   outline_radius: int = 3, outline_dark: int = 80):
-        # Спочатку дивимося кешований знімок (стійкий до видалення)
-        if os.path.exists(CACHED_IMAGE) and os.path.getsize(CACHED_IMAGE) > 0:
-            img_path = CACHED_IMAGE
-        # Потім /dev/shm (тимчасовий)
-        elif os.path.exists("/dev/shm/calibration_raw.png") and os.path.getsize("/dev/shm/calibration_raw.png") > 0:
-            img_path = "/dev/shm/calibration_raw.png"
-            # Копіюємо в кеш щоб не втратити
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            import shutil
-            shutil.copy(img_path, CACHED_IMAGE)
-        else:
+                                   outline_radius: int = 3, outline_dark: int = 80, outline_min_area: int = 20):
+        path = "/dev/shm/calibration_raw.png"
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
             return {"success": False, "error": "Знімок відсутній"}
-        
         tmp_cfg = load_config()
         tmp_cfg.update({"bw": bw, "contrast": contrast, "brightness": brightness,
                         "color_filter": color_filter, "hardness": hardness,
                         "outline_filter": outline_filter, "outline_hmin": outline_hmin,
                         "outline_hmax": outline_hmax, "outline_radius": outline_radius,
-                        "outline_dark": outline_dark})
-        result = await run_python3("preview_worker.py", img_path, json.dumps(tmp_cfg))
+                        "outline_dark": outline_dark, "outline_min_area": outline_min_area})
+        result = await run_python3("preview_worker.py", path, json.dumps(tmp_cfg))
         if result:
             return {"success": True, "image": result}
         return {"success": False, "error": "Помилка фільтрів"}
@@ -214,7 +228,8 @@ class Plugin:
         cal_img = "/dev/shm/calibration_raw.png"
         decky_plugin.logger.info(f"UA_LOG: Знімок. Crop: {crop}")
         try:
-            # НЕ видаляємо старий снімок - просто перезаписуємо!
+            if os.path.exists(cal_img):
+                os.remove(cal_img)
             proc = await asyncio.create_subprocess_exec(
                 "sudo", "-u", "deck", "/usr/bin/bash", cal_script,
                 str(crop["top"]), str(crop["bottom"]), str(crop["left"]), str(crop["right"]),
@@ -222,10 +237,6 @@ class Plugin:
             )
             await proc.communicate()
             if os.path.exists(cal_img) and os.path.getsize(cal_img) > 0:
-                # Копіюємо в постійний кеш
-                os.makedirs(CACHE_DIR, exist_ok=True)
-                import shutil
-                shutil.copy(cal_img, CACHED_IMAGE)
                 result = await run_python3("preview_worker.py", cal_img, json.dumps(cfg))
                 if result:
                     return {"success": True, "image": result}
@@ -234,22 +245,13 @@ class Plugin:
             return {"success": False, "error": str(e)}
 
     async def get_cal_img(self):
-        # Спочатку кешований, потім тимчасовий
-        if os.path.exists(CACHED_IMAGE) and os.path.getsize(CACHED_IMAGE) > 0:
-            img_path = CACHED_IMAGE
-        elif os.path.exists("/dev/shm/calibration_raw.png") and os.path.getsize("/dev/shm/calibration_raw.png") > 0:
-            img_path = "/dev/shm/calibration_raw.png"
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            import shutil
-            shutil.copy(img_path, CACHED_IMAGE)
-        else:
-            return {"success": False, "error": "Знімок відсутній"}
-        
-        appid, _ = get_running_game()
-        cfg = load_config(appid)
-        result = await run_python3("preview_worker.py", img_path, json.dumps(cfg))
-        if result:
-            return {"success": True, "image": result}
+        path = "/dev/shm/calibration_raw.png"
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            appid, _ = get_running_game()
+            cfg = load_config(appid)
+            result = await run_python3("preview_worker.py", path, json.dumps(cfg))
+            if result:
+                return {"success": True, "image": result}
         return {"success": False, "error": "Знімок відсутній"}
 
     async def test_ocr(self):
@@ -267,16 +269,45 @@ class Plugin:
         }
 
     async def test_tts(self, text: str = "Привіт! Це тест синтезу мови."):
+        cfg = load_config()
+        piper_dir = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "piper")
+        piper_bin = os.path.join(piper_dir, "piper")
+        model = os.path.join(piper_dir, "uk_UA-ukrainian_tts-medium.onnx")
+        wav_file = "/dev/shm/ua_tts_test.wav"
+        env = {
+            **os.environ,
+            "LD_LIBRARY_PATH": piper_dir,
+            "XDG_RUNTIME_DIR": "/run/user/1000",
+            "PULSE_RUNTIME_PATH": "/run/user/1000/pulse",
+        }
         try:
-            with open("/tmp/ua_tts_test.txt", "w") as f:
-                f.write(text)
+            piper = await asyncio.create_subprocess_exec(
+                piper_bin, "--model", model,
+                "--speaker", str(cfg["tts_speaker"]),
+                "--length_scale", str(cfg["tts_speed"]),
+                "--output_file", wav_file,
+                stdin=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=env, cwd=piper_dir,
+            )
+            piper.stdin.write(text.encode())
+            piper.stdin.close()
+            await piper.wait()
+            aplay = await asyncio.create_subprocess_exec(
+                "paplay", wav_file,
+                stderr=asyncio.subprocess.DEVNULL, env=env,
+            )
+            await aplay.wait()
             return {"success": True}
         except Exception as e:
+            decky_plugin.logger.error(f"UA_LOG: TTS error: {e}")
             return {"success": False, "error": str(e)}
 
     async def toggle_worker(self, active: bool = False):
         import subprocess
         import signal as sig
+
+        # Вбиваємо старий воркер через /proc
         for proc_dir in os.listdir('/proc'):
             if not proc_dir.isdigit():
                 continue
@@ -287,7 +318,9 @@ class Plugin:
                     os.kill(int(proc_dir), sig.SIGTERM)
             except:
                 pass
+
         await asyncio.sleep(1)
+
         if active:
             script = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "worker.py")
             clean_env = {
