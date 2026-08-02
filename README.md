@@ -6,7 +6,7 @@
 
 **Плагін для Steam Deck який озвучує субтитри українською мовою**
 
-[![Version](https://img.shields.io/badge/version-1.0.7-blue?style=for-the-badge)](https://github.com/Fok86/UA_VoiceCCBridge/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.0.9-blue?style=for-the-badge)](https://github.com/Fok86/UA_VoiceCCBridge/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Steam%20Deck-1a9fff?style=for-the-badge&logo=steam)](https://store.steampowered.com/steamdeck)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 [![Decky](https://img.shields.io/badge/Decky%20Loader-required-orange?style=for-the-badge)](https://github.com/SteamDeckHomebrew/decky-loader)
@@ -33,6 +33,7 @@
 |---|---|
 | 🎯 | Розпізнавання субтитрів в будь-якій грі |
 | 🔊 | **8 голосів** українською (Piper + RHVoice) |
+| 🎭 | **Gender Detection** — різні голоси для Ч/Ж персонажів |
 | 🎮 | Профілі налаштувань для кожної гри окремо |
 | ⌨️ | Режим "Друкарська машинка" |
 | 🎛️ | Повне налаштування зони, фільтрів, OCR і TTS |
@@ -73,6 +74,17 @@
 
 ---
 
+## 🎭 Gender Detection
+
+Плагін автоматично визначає стать персонажа і озвучує різними голосами:
+
+- **Словник 500+ імен** — українські + західні транслітеровані
+- Підтримка форматів: `ОФІЦЕР ГРЕЙС:`, `ЕНН ЛЬЮЇС.`, `ДОКТОР ОЛІВІЯ БЛАНШ`
+- Розпізнавання злитих імен OCR (`ЕННЛЬЮЇС` → жіночий)
+- В gender-режимі використовуються тільки **RHVoice** голоси — без втрати FPS
+
+---
+
 ## 📦 Встановлення
 
 **1.** Завантаж zip з **[Releases](https://github.com/Fok86/UA_VoiceCCBridge/releases/latest)**
@@ -91,7 +103,7 @@ sudo systemctl restart plugin_loader
 ```
 1. Запусти гру з українськими субтитрами
 2. Плагін → "Зона субтитрів" → Зробити знімок → Зберегти
-3. "Фільтри зображення" → Вибери колір субтитрів → Зберегти  
+3. "Фільтри зображення" → Вибери колір субтитрів → Зберегти
 4. "OCR" → Тест OCR → перевір розпізнавання
 5. "Синтез мови" → Вибери голос → Тест → Зберегти
 ✅ Готово!
@@ -106,7 +118,8 @@ sudo systemctl restart plugin_loader
 | OCR | [Tesseract 5](https://github.com/tesseract-ocr/tesseract) + [tesserocr](https://github.com/sirfz/tesserocr) |
 | TTS (Piper) | [Piper](https://github.com/rhasspy/piper) + [ukrainian-tts](https://github.com/robinhad/ukrainian-tts) |
 | TTS (RHVoice) | [RHVoice](https://github.com/RHVoice/RHVoice) |
-| EQ | SoX — Sound eXchange |
+| EQ | SoX — Sound eXchange + `eq_config.json` |
+| Gender | Словник імен + суфіксні правила |
 | Знімок | GStreamer + PipeWire |
 | UI | React + Decky Loader SDK |
 
