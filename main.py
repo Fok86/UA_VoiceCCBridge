@@ -5,11 +5,20 @@ import base64
 import json
 import re
 import subprocess
+import threading
 import decky_plugin
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from hidraw_monitor import HidrawButtons
+except Exception:
+    HidrawButtons = None
 
 CONFIG_DIR  = "/home/deck/.config/ua_voice_plugin"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 PROFILES_DIR = os.path.join(CONFIG_DIR, "profiles")
+API_KEYS_PATH = os.path.join(CONFIG_DIR, "api_keys.json")
+API_KEY_TXT = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "api_key.txt")
 SCREEN_W = 1280
 SCREEN_H = 800
 
@@ -60,6 +69,8 @@ def load_config(appid=None):
         "tts_speaker": 1, "tts_speed": 0.8, "tts_volume": 100,
         "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
         "gender_detect": False, "tts_speaker_male": 5, "tts_speaker_female": 7,
+        "ai_enabled": False, "ai_lang": "uk", "ai_translate": False,
+        "ai_model": "llama-3.1-8b-instant",
     }
     # Профіль гри (якщо є) — НЕ глобальний конфіг!
     if appid:
@@ -95,6 +106,32 @@ def save_config(data: dict, appid=None):
         current.update(data)
         with open(CONFIG_PATH, "w") as f:
             json.dump(current, f)
+
+def load_api_keys() -> dict:
+    """Читає Groq ключ. Пріоритет — api_key.txt у папці плагіна."""
+    # 1. Простий txt у папці плагіна (основний спосіб для користувача)
+    try:
+        if os.path.exists(API_KEY_TXT):
+            with open(API_KEY_TXT) as f:
+                key = f.read().strip().strip('"').strip("'").strip()
+            if key and key.startswith("gsk_"):
+                return {"groq": key}
+    except: pass
+    # 2. Старий json (сумісність)
+    try:
+        if os.path.exists(API_KEYS_PATH):
+            with open(API_KEYS_PATH) as f:
+                return json.load(f)
+    except: pass
+    return {}
+
+def save_api_keys(data: dict):
+    """Зберігає API ключі в окремий файл"""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    current = load_api_keys()
+    current.update(data)
+    with open(API_KEYS_PATH, "w") as f:
+        json.dump(current, f)
 
 def calc_crop(cfg: dict):
     w = cfg["width"]; h = cfg["height"]; ob = cfg["offset_bottom"]
@@ -203,18 +240,79 @@ class Plugin:
                      "tts_speaker_female": speaker_female}, appid)
         return {"success": True}
 
+    async def save_ai_settings(self, ai_enabled: bool, ai_lang: str, ai_translate: bool, ai_model: str):
+        appid, _ = get_running_game()
+        if not appid: return {"success": True}
+        save_config({"ai_enabled": ai_enabled, "ai_lang": ai_lang,
+                     "ai_translate": ai_translate, "ai_model": ai_model}, appid)
+        return {"success": True}
+
+    async def save_api_key(self, service: str, key: str):
+        """Зберігає API ключ у глобальний файл api_keys.json"""
+        save_api_keys({service: key})
+        return {"success": True}
+
+    async def get_api_keys(self):
+        """Повертає API ключі (ключі є але значення масковані)"""
+        keys = load_api_keys()
+        masked = {k: ("*" * 8 + v[-4:] if len(v) > 4 else "****") for k, v in keys.items()}
+        return {"success": True, "keys": masked}
+
+    async def get_groq_status(self):
+        """Повертає статус Groq + чи є ключ у файлі"""
+        keys = load_api_keys()
+        has_key = bool(keys.get("groq", "").startswith("gsk_"))
+        result = {"success": True, "has_key": has_key, "key_path": API_KEY_TXT}
+        # Останній статус роботи
+        try:
+            path = "/tmp/ua_groq_status.json"
+            if os.path.exists(path):
+                with open(path) as f:
+                    saved = json.load(f)
+                    result["status"] = saved.get("status", "")
+                    result["time"] = saved.get("time", "")
+                    return result
+        except: pass
+        result["status"] = "✅ Ключ знайдено" if has_key else "❌ Ключ не знайдено"
+        result["time"] = ""
+        return result
+
+    async def test_ai_translate(self, text: str):
+        """Тест перекладу через Groq"""
+        try:
+            keys = load_api_keys()
+            groq_key = keys.get("groq", "")
+            if not groq_key:
+                return {"success": False, "error": "Groq API ключ не знайдено"}
+            appid, _ = get_running_game()
+            cfg = load_config(appid)
+            result = await run_python3("groq_translate.py", groq_key, cfg.get("ai_model", "llama-3.1-8b-instant"), text)
+            return {"success": True, "result": result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     async def get_filtered_preview(self, bw: bool, contrast: float, brightness: float, color_filter: str, hardness: int,
                                    outline_filter: bool = False, outline_hmin: int = 0, outline_hmax: int = 255,
                                    outline_radius: int = 3, outline_dark: int = 80, outline_min_area: int = 20):
-        path = "/dev/shm/calibration_raw.png"
+        # Беремо повний кадр, обрізаємо по зоні, накладаємо фільтр
+        path = "/dev/shm/fullshot_raw.png"
         if not os.path.exists(path) or os.path.getsize(path) == 0:
-            return {"success": False, "error": "Знімок відсутній"}
-        tmp_cfg = load_config()
+            # Fallback на старий обрізаний знімок
+            path = "/dev/shm/calibration_raw.png"
+            if not os.path.exists(path) or os.path.getsize(path) == 0:
+                return {"success": False, "error": "Знімок відсутній"}
+            use_crop = False
+        else:
+            use_crop = True
+        appid, _ = get_running_game()
+        tmp_cfg = load_config(appid)
         tmp_cfg.update({"bw": bw, "contrast": contrast, "brightness": brightness,
                         "color_filter": color_filter, "hardness": hardness,
                         "outline_filter": outline_filter, "outline_hmin": outline_hmin,
                         "outline_hmax": outline_hmax, "outline_radius": outline_radius,
                         "outline_dark": outline_dark, "outline_min_area": outline_min_area})
+        if use_crop:
+            tmp_cfg["_crop"] = calc_crop(tmp_cfg)
         result = await run_python3("preview_worker.py", path, json.dumps(tmp_cfg))
         if result:
             return {"success": True, "image": result}
@@ -254,12 +352,54 @@ class Plugin:
                 return {"success": True, "image": result}
         return {"success": False, "error": "Знімок відсутній"}
 
+    async def capture_full_snapshot(self):
+        """Повний знімок екрану БЕЗ обрізки і фільтрів — для фону меню зони"""
+        full_script = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "fullshot.sh")
+        raw = "/dev/shm/fullshot_raw.png"
+        try:
+            if os.path.exists(raw):
+                os.remove(raw)
+            proc = await asyncio.create_subprocess_exec(
+                "sudo", "-u", "deck", "/usr/bin/bash", full_script,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+            if os.path.exists(raw) and os.path.getsize(raw) > 0:
+                # Повертаємо БЕЗ фільтрів — чистий кадр
+                result = await run_python3("preview_worker.py", raw, json.dumps({}))
+                if result:
+                    return {"success": True, "image": result}
+            return {"success": False, "error": "Не вдалося зробити знімок"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def get_full_snapshot(self):
+        """Повертає останній повний знімок якщо є"""
+        raw = "/dev/shm/fullshot_raw.png"
+        if os.path.exists(raw) and os.path.getsize(raw) > 0:
+            result = await run_python3("preview_worker.py", raw, json.dumps({}))
+            if result:
+                return {"success": True, "image": result}
+        return {"success": False, "error": "Знімок відсутній"}
+
     async def test_ocr(self):
-        path = "/dev/shm/calibration_raw.png"
-        if not os.path.exists(path) or os.path.getsize(path) == 0:
-            return {"success": False, "error": "Знімок відсутній"}
         appid, _ = get_running_game()
         cfg = load_config(appid)
+        # Беремо повний кадр і обрізаємо по зоні
+        full = "/dev/shm/fullshot_raw.png"
+        path = "/dev/shm/calibration_raw.png"
+        if os.path.exists(full) and os.path.getsize(full) > 0:
+            # Обрізаємо повний кадр по зоні у окремий файл
+            crop = calc_crop(cfg)
+            cropped = "/dev/shm/ua_ocr_crop.png"
+            crop_cfg = dict(cfg)
+            crop_cfg["_crop"] = crop
+            crop_cfg["_save_to"] = cropped
+            await run_python3("preview_worker.py", full, json.dumps(crop_cfg))
+            if os.path.exists(cropped) and os.path.getsize(cropped) > 0:
+                path = cropped
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            return {"success": False, "error": "Знімок відсутній"}
         text = await run_python3("ocr_worker.py", path, json.dumps(cfg))
         preview = await run_python3("preview_worker.py", path, json.dumps(cfg))
         return {
@@ -342,4 +482,77 @@ class Plugin:
         return {"success": True}
 
     async def _main(self): pass
-    async def _unload(self): await self.toggle_worker(False)
+    async def _unload(self):
+        await self.toggle_worker(False)
+        self.stop_button_monitor_sync()
+
+    # ── Монітор задніх кнопок (L4+R4 → знімок) ──────────────────────────
+    _btn_proc = None
+
+    async def start_button_monitor(self):
+        decky_plugin.logger.info(f"UA_LOG: start_button_monitor викликано, Uid={os.getuid()}")
+        # Перевіряємо чи вже працює
+        try:
+            r = subprocess.run(["pgrep", "-f", "button_watcher.py"],
+                               capture_output=True, timeout=3)
+            if r.returncode == 0:
+                return {"success": True}
+        except Exception:
+            pass
+        try:
+            # Прибираємо старий стоп-прапорець
+            try: os.remove("/tmp/ua_button_stop")
+            except: pass
+            watcher = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "button_watcher.py")
+            logf = open("/tmp/ua_watcher.log", "w")
+            self._btn_proc = subprocess.Popen(
+                ["python3", watcher],
+                stdout=logf, stderr=subprocess.STDOUT
+            )
+            decky_plugin.logger.info(f"UA_LOG: button_watcher запущено pid={self._btn_proc.pid}")
+            return {"success": True}
+        except Exception as e:
+            decky_plugin.logger.error(f"UA_LOG: start_button_monitor error: {e}")
+            self._btn_proc = None
+            return {"success": False, "error": str(e)}
+
+    def stop_button_monitor_sync(self):
+        # Створюємо стоп-прапорець — watcher сам вийде
+        try:
+            with open("/tmp/ua_button_stop", "w") as f:
+                f.write("1")
+            decky_plugin.logger.info("UA_LOG: стоп-прапорець створено")
+        except Exception as e:
+            decky_plugin.logger.error(f"UA_LOG: стоп-прапорець error: {e}")
+        # Запасний pkill
+        for pkill_path in ["/usr/bin/pkill", "/bin/pkill"]:
+            if os.path.exists(pkill_path):
+                try:
+                    r = subprocess.run([pkill_path, "-9", "-f", "button_watcher.py"],
+                                       capture_output=True, timeout=3)
+                    decky_plugin.logger.info(f"UA_LOG: pkill rc={r.returncode}")
+                except Exception:
+                    pass
+                break
+        self._btn_proc = None
+
+    async def stop_button_monitor(self):
+        decky_plugin.logger.info("UA_LOG: stop_button_monitor викликано")
+        try:
+            with open("/tmp/ua_button_stop", "w") as f:
+                f.write("1")
+            decky_plugin.logger.info("UA_LOG: стоп-прапорець створено")
+        except Exception as e:
+            decky_plugin.logger.error(f"UA_LOG: стоп error: {e}")
+        self._btn_proc = None
+        return {"success": True}
+
+    async def get_button_monitor_status(self):
+        # Перевіряємо реальний процес watcher (може працювати після перезапуску main)
+        try:
+            r = subprocess.run(["pgrep", "-f", "button_watcher.py"],
+                               capture_output=True, timeout=3)
+            running = r.returncode == 0
+        except Exception:
+            running = self._btn_proc is not None and self._btn_proc.poll() is None
+        return {"success": True, "running": running}

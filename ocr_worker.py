@@ -97,7 +97,7 @@ if __name__ == "__main__":
     img = apply_filters(img, cfg)
     psm = cfg.get("ocr_psm", 6)
     oem = cfg.get("ocr_oem", 1)
-    with tesserocr.PyTessBaseAPI(lang="ukr", path=TESSDATA_PATH, oem=oem, psm=tesserocr.PSM(psm)) as api:
+    with tesserocr.PyTessBaseAPI(lang="ukr", path=TESSDATA_PATH, oem=oem, psm=psm) as api:
         api.SetImage(img.convert("L"))
         api.SetVariable("textord_min_xheight", str(int(cfg.get("ocr_min_xheight", 10))))
         raw = api.GetUTF8Text().strip()

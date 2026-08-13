@@ -24,8 +24,11 @@ except ImportError:
     HAS_SCIPY = False
 
 from uk_filter import filter_text, normalize, decide, trim_incomplete_word, UA_VOWELS
+from en_filter import filter_text_en
 
-CONFIG_PATH = "/home/deck/.config/ua_voice_plugin/config.json"
+CONFIG_PATH   = "/home/deck/.config/ua_voice_plugin/config.json"
+API_KEYS_PATH = "/home/deck/.config/ua_voice_plugin/api_keys.json"
+API_KEY_TXT = os.path.join(PLUGIN_DIR, "api_key.txt")
 TESSDATA    = os.path.join(PLUGIN_DIR, "tessdata/")
 PIPER_DIR   = os.path.join(PLUGIN_DIR, "piper")
 PIPER_BIN   = os.path.join(PIPER_DIR, "piper")
@@ -72,6 +75,8 @@ def load_config():
         "tts_cpu_idle": True, "tts_omp_threads": 1, "tts_nice": 0,
         "tts_malloc_arena": False, "tts_malloc_mmap": False,
         "gender_detect": False, "tts_speaker_male": 5, "tts_speaker_female": 7,
+        "ai_enabled": False, "ai_lang": "uk", "ai_translate": False,
+        "ai_model": "llama-3.1-8b-instant",
     }
     try:
         with open(CONFIG_PATH) as f:
@@ -221,6 +226,83 @@ def speak(text, cfg):
             print(f"❌ Piper write error: {e}", file=sys.stderr)
             _piper_proc = None
 
+def load_api_keys() -> dict:
+    """Читає Groq ключ. Пріоритет — api_key.txt у папці плагіна."""
+    # 1. Простий txt файл у папці плагіна (основний спосіб)
+    try:
+        if os.path.exists(API_KEY_TXT):
+            with open(API_KEY_TXT) as f:
+                key = f.read().strip()
+            # Прибираємо можливі лапки/пробіли
+            key = key.strip().strip('"').strip("'").strip()
+            if key and key.startswith("gsk_"):
+                return {"groq": key}
+    except: pass
+    # 2. Старий json (сумісність)
+    try:
+        if os.path.exists(API_KEYS_PATH):
+            with open(API_KEYS_PATH) as f:
+                return json.load(f)
+    except: pass
+    return {}
+
+GROQ_STATUS_PATH = "/tmp/ua_groq_status.json"
+GROQ_BAD_RESPONSES = [
+    'порожній рядок', 'empty string', 'правила:', 'rules:',
+    'ти фільтр', 'ти перекладач', 'you are', 'я займаюсь',
+    'я перекладач', 'субтитрів в іграх', 'у тебе є текст',
+    'text comes from', 'ocr and may', 'перекладати на',
+    'відповідай тільки', 'reply only', 'no explanations',
+    'fix ocr', 'return empty', 'поверни порожній',
+]
+
+def groq_process(text: str, cfg: dict) -> str:
+    """Відправляє текст в Groq для очищення/перекладу. Повертає оброблений текст або ''"""
+    try:
+        keys = load_api_keys()
+        api_key = keys.get("groq", "")
+        if not api_key:
+            _save_groq_status("❌ API ключ не знайдено")
+            return text  # fallback — повертаємо оригінал
+        model = cfg.get("ai_model", "llama-3.1-8b-instant")
+        lang = cfg.get("ai_lang", "uk")
+        translate = str(cfg.get("ai_translate", False)).lower()
+        groq_script = os.path.join(PLUGIN_DIR, "groq_translate.py")
+        env = dict(os.environ)
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["LANG"] = "en_US.UTF-8"
+        result = subprocess.run(
+            ["python3", groq_script, api_key, model, lang, translate, text],
+            capture_output=True, text=True, timeout=5,
+            encoding="utf-8", env=env
+        )
+        if result.stderr:
+            stderr = result.stderr.strip()
+            print(f"GROQ_LOG: {stderr}", flush=True)
+            if "rate_limit_exceeded" in stderr:
+                _save_groq_status("❌ Ліміт токенів вичерпано — спробуй завтра")
+            elif "invalid_api_key" in stderr:
+                _save_groq_status("❌ Невірний API ключ")
+            elif "GROQ_OK" in stderr:
+                _save_groq_status("✅ Працює")
+        output = result.stdout.strip()
+        # Groq іноді повертає "порожній рядок" буквально або частину промпту
+        if any(b in output.lower() for b in GROQ_BAD_RESPONSES):
+            _save_groq_status("⚠️ Groq повернув некоректну відповідь")
+            return ""
+        return output if output else ""
+    except Exception as e:
+        print(f"❌ Groq error: {e}", file=sys.stderr)
+        _save_groq_status(f"❌ {e}")
+        return text  # fallback
+
+def _save_groq_status(status: str):
+    try:
+        import json as _json
+        with open(GROQ_STATUS_PATH, "w") as f:
+            _json.dump({"status": status, "time": time.strftime("%H:%M:%S")}, f)
+    except: pass
+
 def load_eq_config():
     try:
         with open(EQ_CONFIG) as f:
@@ -292,14 +374,13 @@ def speak_rhvoice(text, cfg):
             print(f"❌ RHVoice error: {e}", file=sys.stderr, flush=True)
 
 def get_gamescope_id():
-    """Знаходить PipeWire node ID для gamescope"""
+    """Знаходить PipeWire object.serial для gamescope (як у fullshot.sh)"""
     try:
         out = subprocess.check_output(["pw-cli", "list-objects"], stderr=subprocess.DEVNULL).decode()
-        # Шукаємо: "id 93, type PipeWire:Interface:Node" перед "node.name = "gamescope""
         blocks = out.split('\n\n')
         for block in blocks:
-            if 'node.name = "gamescope"' in block and 'Video/Source' in block:
-                m = re.search(r'id (\d+),\s*type PipeWire:Interface:Node', block)
+            if 'node.name = "gamescope"' in block:
+                m = re.search(r'object\.serial = "(\d+)"', block)
                 if m:
                     return m.group(1)
     except Exception:
@@ -338,8 +419,10 @@ def main():
     cfg_mtime = os.path.getmtime(CONFIG_PATH) if os.path.exists(CONFIG_PATH) else 0
 
     t0 = time.monotonic()
-    ocr_api = tesserocr.PyTessBaseAPI(lang="ukr", path=TESSDATA, oem=1, psm=cfg.get("ocr_psm", 6))
-    print(f"⏱️  Тесserocr ініціалізація: {(time.monotonic()-t0)*1000:.0f}мс\n", flush=True)
+    ocr_lang = "eng" if cfg.get("ai_lang") == "en" else "ukr"
+    ocr_api = tesserocr.PyTessBaseAPI(lang=ocr_lang, path=TESSDATA, oem=1, psm=cfg.get("ocr_psm", 6))
+    current_ocr_lang = ocr_lang
+    print(f"⏱️  Тесserocr ініціалізація ({ocr_lang}): {(time.monotonic()-t0)*1000:.0f}мс\n", flush=True)
 
     start_piper(cfg)
     last_text = ""
@@ -366,6 +449,13 @@ def main():
                 cfg_mtime = mtime
                 last_text = ""
                 ocr_api.SetVariable("tessedit_pageseg_mode", str(cfg.get("ocr_psm", 6)))
+                # Перезапуск OCR якщо мова змінилась
+                new_ocr_lang = "eng" if cfg.get("ai_lang") == "en" else "ukr"
+                if new_ocr_lang != current_ocr_lang:
+                    ocr_api.End()
+                    ocr_api = tesserocr.PyTessBaseAPI(lang=new_ocr_lang, path=TESSDATA, oem=1, psm=cfg.get("ocr_psm", 6))
+                    current_ocr_lang = new_ocr_lang
+                    print(f"🔄 OCR мова змінена на: {new_ocr_lang}", flush=True)
                 if _piper_proc:
                     _piper_proc.kill()
                 start_piper(cfg)
@@ -406,9 +496,21 @@ def main():
             ocr_api.SetVariable("textord_min_xheight", str(int(cfg.get("ocr_min_xheight", 10))))
             raw = ocr_api.GetUTF8Text().strip()
             print(f"RAW: {raw!r}", flush=True)
-            new_text = filter_text(raw, cfg)
+
+            # Вибір фільтра залежно від мови і режиму ШІ
+            ai_enabled = cfg.get("ai_enabled", False)
+            ai_lang = cfg.get("ai_lang", "uk")
+
+            if ai_lang == "en":
+                new_text = filter_text_en(raw, cfg)
+            else:
+                new_text = filter_text(raw, cfg)
+
+            # Зберігаємо оригінал для decide (до перекладу)
+            new_text_for_decide = new_text
+
             t_ocr_ms = (time.monotonic() - t_ocr) * 1000
-            
+
             if new_text:
                 print(f"{WHITE}OCR: {t_ocr_ms:.0f}мс → \"{new_text}\"{RESET}", flush=True)
             else:
@@ -422,20 +524,35 @@ def main():
             time.sleep(interval)
             continue
 
-        # 4. DECIDE (Фільтр повторів)
+        # 4. DECIDE (Фільтр повторів) — порівнюємо EN оригінал ДО перекладу
         t_decide = time.monotonic()
-        speak_text = decide(last_text, new_text, cfg)
+        decide_text = new_text_for_decide if (ai_enabled and ai_lang == "en") else new_text
+        speak_text = decide(last_text, decide_text, cfg)
         t_decide_ms = (time.monotonic() - t_decide) * 1000
-        
+
         if not speak_text:
-            # Повтор - червоний OCR текст
             print(f"{RED}OCR: {t_ocr_ms:.0f}мс → \"{new_text}\"{RESET}", flush=True)
+            time.sleep(interval)
+            continue
+
+        # Оновлюємо last_text одразу після decide (EN оригінал)
+        last_text = new_text_for_decide if (ai_enabled and ai_lang == "en") else new_text
+
+        # 5. ШІ обробка — ТІЛЬКИ для нових фраз після decide
+        if ai_enabled and new_text and len(new_text) >= 5:
+            t_ai = time.monotonic()
+            groq_result = groq_process(new_text, cfg)
+            t_ai_ms = (time.monotonic() - t_ai) * 1000
+            if groq_result and not any(b in groq_result.lower() for b in GROQ_BAD_RESPONSES):
+                new_text = groq_result
+                print(f"AI: {t_ai_ms:.0f}мс → \"{new_text}\"", flush=True)
+            else:
+                print(f"AI: {t_ai_ms:.0f}мс → (відкинуто)", flush=True)
         
-        # 5. TTS
+        # 6. TTS
         t_tts = time.monotonic()
-        if speak_text:
-            last_text = new_text
-            tts_text = trim_incomplete_word(speak_text)
+        if True:  # speak_text вже перевірено вище
+            tts_text = trim_incomplete_word(new_text)
             if tts_text:
                 tts_cfg = cfg
                 # Гендер-детекція: підміна голосу за тегом [F]/[M]
@@ -459,14 +576,10 @@ def main():
                 t_tts_ms = (time.monotonic() - t_tts) * 1000
                 spk = tts_cfg.get("tts_speaker", 1)
                 gender_log = f" [♀ spk={spk}]" if spk == cfg.get("tts_speaker_female") else f" [♂ spk={spk}]" if spk == cfg.get("tts_speaker_male") else f" [spk={spk}]"
-                # Витягуємо ім'я персонажа з оригінального raw тексту для логу
-                _m = re.match(r"^([А-ЯІЇЄа-яієї][А-ЯІЇЄа-яієї'ʼ\s]{0,40}?)\s*[:,]\s*", raw or "")
-                char_log = f" [{_m.group(1).strip()}]" if _m else ""
-                print(f"{BLUE}TTS: {t_tts_ms:.0f}мс{gender_log}{char_log} → \"{tts_text}\"{RESET}", flush=True)
+                ai_log = " [AI🌐]" if ai_enabled else ""
+                print(f"{BLUE}TTS: {t_tts_ms:.0f}мс{gender_log}{ai_log} → \"{tts_text}\"{RESET}", flush=True)
             else:
                 pass  # текст обрізаний, нічого не пишемо
-        else:
-            t_tts_ms = 0
 
         # TOTAL
         t_cycle_total = (time.monotonic() - t_cycle_start) * 1000

@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "bin": "python3",
-  "flags": [],
+  "flags": ["root"],
   "api": {
     "version": 2
   },

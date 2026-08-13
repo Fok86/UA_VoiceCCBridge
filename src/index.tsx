@@ -4,7 +4,7 @@ import { FaCamera, FaLanguage, FaVolumeUp, FaArrowLeft, FaPowerOff, FaSlidersH }
 
 const SCREEN_W = 1280;
 
-const PreviewBox: FC<{ imgData: string | null; errorMsg: string | null }> = ({ imgData, errorMsg }) => {
+const PreviewBox: FC<{ imgData: string | null; errorMsg: string | null; sticky?: boolean }> = ({ imgData, errorMsg, sticky }) => {
   const imgRef = React.useRef<HTMLImageElement>(null);
   const scaleRef = React.useRef(1);
   const offsetRef = React.useRef({ x: 0, y: 0 });
@@ -54,36 +54,48 @@ const PreviewBox: FC<{ imgData: string | null; errorMsg: string | null }> = ({ i
     applyTransform();
   };
 
+  const inner = (
+    <div style={{
+      width: "100%", boxSizing: "border-box",
+      ...(sticky ? {
+        position: "sticky" as const, top: 0, zIndex: 100,
+        background: "#0e141b", padding: "6px 0",
+      } : {})
+    }}>
+      {!imgData
+        ? <div style={{ background: "#000", border: "1px solid #444", borderRadius: "4px",
+            minHeight: "60px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+            <div style={{ color: "orange", textAlign: "center", padding: "8px", fontSize: "11px" }}>
+              {errorMsg || "Знімок відсутній"}
+            </div>
+          </div>
+        : <div
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onDoubleClick={onDoubleTap}
+            style={{
+              background: "#000", border: "1px solid #444", borderRadius: "4px",
+              overflow: "hidden", touchAction: "none", cursor: "grab", height: "100px",
+              display: "flex", justifyContent: "center", alignItems: "center",
+            }}>
+            <img
+              ref={imgRef}
+              src={`data:image/jpeg;base64,${imgData}`}
+              style={{
+                width: "100%", display: "block", transformOrigin: "center",
+                userSelect: "none",
+              }}
+            />
+          </div>
+      }
+    </div>
+  );
+
+  // Коли sticky — БЕЗ PanelSectionRow (він ламає position:sticky)
+  if (sticky) return inner;
   return (
     <PanelSectionRow>
-      <div style={{ width: "100%", boxSizing: "border-box" }}>
-        {!imgData
-          ? <div style={{ background: "#000", border: "1px solid #444", borderRadius: "4px",
-              minHeight: "60px", display: "flex", justifyContent: "center", alignItems: "center" }}>
-              <div style={{ color: "orange", textAlign: "center", padding: "8px", fontSize: "11px" }}>
-                {errorMsg || "Знімок відсутній"}
-              </div>
-            </div>
-          : <div
-              onTouchStart={onTouchStart}
-              onTouchMove={onTouchMove}
-              onDoubleClick={onDoubleTap}
-              style={{
-                background: "#000", border: "1px solid #444", borderRadius: "4px",
-                overflow: "hidden", touchAction: "none", cursor: "grab", height: "100px",
-                display: "flex", justifyContent: "center", alignItems: "center",
-              }}>
-              <img
-                ref={imgRef}
-                src={`data:image/jpeg;base64,${imgData}`}
-                style={{
-                  width: "100%", display: "block", transformOrigin: "center",
-                  userSelect: "none", willChange: "transform",
-                }}
-              />
-            </div>
-        }
-      </div>
+      {inner}
     </PanelSectionRow>
   );
 };
@@ -95,6 +107,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const [isActive, setIsActive] = useState(localStorage.getItem("ua_voice_worker") === "true");
   const [timerActive, setTimerActive] = useState(false);
   const [zoneExpanded, setZoneExpanded] = useState(false);
+  const [btnTrigger, setBtnTrigger] = useState(false);
   const [currentGame, setCurrentGame] = useState<{appid: string|null, name: string|null}>({appid: null, name: null});
   const [focusedBtn, setFocusedBtn] = useState<string|null>(null);
 
@@ -140,6 +153,15 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   // TTS
   const [ttsSpeaker, setTtsSpeaker] = useState(1);
   const [genderDetect, setGenderDetect] = useState(false);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiLang, setAiLang] = useState("uk");
+  const [aiTranslate, setAiTranslate] = useState(false);
+  const [aiModel, setAiModel] = useState("llama-3.1-8b-instant");
+  const [aiApiKey, setAiApiKey] = useState("");
+  const [aiTestResult, setAiTestResult] = useState<string | null>(null);
+  const [aiTesting, setAiTesting] = useState(false);
+  const [aiStatus, setAiStatus] = useState<string>("—");
+  const [aiStatusTime, setAiStatusTime] = useState<string>("");
   const [ttsSpeakerMale, setTtsSpeakerMale] = useState(5);
   const [ttsSpeakerFemale, setTtsSpeakerFemale] = useState(7);
   const [ttsSpeed, setTtsSpeed] = useState(1.0);
@@ -157,10 +179,16 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
 
   // При вході в меню
   useEffect(() => {
-    if (activeMenu === "image") { loadZone(); fetchImg(); }
+    if (activeMenu === "image") {
+      loadZone(); fetchFullImg();
+      serverApi.callPluginMethod("get_button_monitor_status", {}).then((r: any) => {
+        setBtnTrigger(r.success && r.result.running === true);
+      });
+    }
     if (activeMenu === "filters") { loadFilters(); }
     if (activeMenu === "ocr") { loadOcrSettings(); }
     if (activeMenu === "tts") { loadTtsSettings(); }
+    if (activeMenu === "ai") { loadAiSettings(); }
   }, [activeMenu]);
 
   // Автооновлення превью при зміні фільтрів з debounce
@@ -223,6 +251,28 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     } else {
       setErrorMsg(res.result?.error || "Знімок відсутній");
     }
+  };
+
+  // Повний знімок для фону меню зони
+  const fetchFullImg = async () => {
+    const res = await serverApi.callPluginMethod("get_full_snapshot", {});
+    if (res.success && res.result.success) {
+      setImgData(res.result.image);
+      setErrorMsg(null);
+    }
+  };
+
+  const captureFullShot = async () => {
+    setTimerActive(true);
+    setImgData(null);
+    setErrorMsg(null);
+    const res = await serverApi.callPluginMethod("capture_full_snapshot", {});
+    if (res.success && res.result.success) {
+      setImgData(res.result.image);
+    } else {
+      setErrorMsg(res.result?.error || "Помилка знімку");
+    }
+    setTimerActive(false);
   };
 
   // Превью фільтрів з дебounce
@@ -289,6 +339,28 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     }
   };
 
+  const loadAiSettings = async () => {
+    const res = await serverApi.callPluginMethod("get_zone", {});
+    if (res.success && res.result.success) {
+      const z = res.result.zone;
+      setAiEnabled(z.ai_enabled ?? false);
+      setAiLang(z.ai_lang ?? "uk");
+      setAiTranslate(z.ai_translate ?? false);
+      setAiModel(z.ai_model ?? "llama-3.1-8b-instant");
+    }
+    // Завантажуємо маскований ключ
+    const keyRes = await serverApi.callPluginMethod("get_api_keys", {});
+    if (keyRes.success && keyRes.result.keys?.groq) {
+      setAiApiKey(keyRes.result.keys.groq);
+    }
+    // Завантажуємо статус Groq
+    const statusRes = await serverApi.callPluginMethod("get_groq_status", {});
+    if (statusRes.success) {
+      setAiStatus(statusRes.result.status || "—");
+      setAiStatusTime(statusRes.result.time || "");
+    }
+  };
+
   const saveZone = async () => {
     await serverApi.callPluginMethod("save_zone", {
       offset_bottom: offsetBottom, width: zoneWidth, height: zoneHeight,
@@ -298,6 +370,12 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const startTimer = async () => {
     setTimerActive(true);
     setImgData(null);
+    setErrorMsg(null);
+    // Показуємо countdown — час закрити меню
+    for (let i = 3; i > 0; i--) {
+      setErrorMsg(`📷 Закрийте меню! Знімок через ${i}с...`);
+      await new Promise(r => setTimeout(r, 1000));
+    }
     setErrorMsg(null);
     const res = await serverApi.callPluginMethod("start_capture_timer", {});
     if (res.success && res.result.success) {
@@ -312,6 +390,11 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
   const takeScreenshot = async () => {
     setTimerActive(true);
     setImgData(null);
+    setErrorMsg(null);
+    for (let i = 3; i > 0; i--) {
+      setErrorMsg(`📷 Закрийте меню! Знімок через ${i}с...`);
+      await new Promise(r => setTimeout(r, 1000));
+    }
     setErrorMsg(null);
     const res = await serverApi.callPluginMethod("start_capture_timer", {});
     if (res.success && res.result.success) {
@@ -382,11 +465,26 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
                 background: "#1a1a2e", border: "1px solid #444",
                 borderRadius: "4px", overflow: "hidden", boxSizing: "border-box",
               }}>
+                {/* Знімок як фон */}
+                {imgData ? (
+                  <img src={`data:image/jpeg;base64,${imgData}`} style={{
+                    position: "absolute", inset: 0,
+                    width: "100%", height: "100%", objectFit: "fill",
+                  }} />
+                ) : (
+                  <div style={{
+                    position: "absolute", inset: 0,
+                    backgroundImage: "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)",
+                    backgroundSize: "10% 12.5%",
+                  }} />
+                )}
+                {/* Затемнення поза зоною */}
                 <div style={{
                   position: "absolute", inset: 0,
-                  backgroundImage: "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)",
-                  backgroundSize: "10% 12.5%",
+                  background: "rgba(0,0,0,0.5)",
+                  clipPath: `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 ${((800 - offsetBottom - zoneHeight) / 800) * 100}%, ${((SCREEN_W - zoneWidth) / 2 / SCREEN_W) * 100}% ${((800 - offsetBottom - zoneHeight) / 800) * 100}%, ${((SCREEN_W - zoneWidth) / 2 / SCREEN_W) * 100}% ${((800 - offsetBottom) / 800) * 100}%, ${((SCREEN_W - (SCREEN_W - zoneWidth) / 2) / SCREEN_W) * 100}% ${((800 - offsetBottom) / 800) * 100}%, ${((SCREEN_W - (SCREEN_W - zoneWidth) / 2) / SCREEN_W) * 100}% ${((800 - offsetBottom - zoneHeight) / 800) * 100}%, 0 ${((800 - offsetBottom - zoneHeight) / 800) * 100}%)`,
                 }} />
+                {/* Рамка зони */}
                 <div style={{
                   position: "absolute",
                   left: `${((SCREEN_W - zoneWidth) / 2 / SCREEN_W) * 100}%`,
@@ -401,6 +499,7 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
                   left: `${((SCREEN_W - zoneWidth) / 2 / SCREEN_W) * 100}%`,
                   top: `${((800 - offsetBottom - zoneHeight) / 800) * 100 + 1}%`,
                   color: "#00ff00", fontSize: "8px", whiteSpace: "nowrap", paddingLeft: "2px",
+                  textShadow: "0 0 2px #000",
                 }}>{zoneWidth}×{zoneHeight}</div>
               </div>
             </div>
@@ -408,20 +507,41 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
         </>)}
 
         <PanelSectionRow>
-          <Button onClick={async () => { await saveZone(); }}
-            style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
-            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
-          </Button>
+          <ToggleField
+            label="🎮 Знімок по кнопці L4+R4"
+            description="Заморозити кадр під час гри"
+            checked={btnTrigger}
+            onChange={async (v: boolean) => {
+              setBtnTrigger(v);
+              if (v) {
+                await serverApi.callPluginMethod("start_button_monitor", {});
+              } else {
+                await serverApi.callPluginMethod("stop_button_monitor", {});
+              }
+            }}
+          />
         </PanelSectionRow>
 
         <PanelSectionRow>
-          <Button disabled={timerActive} onClick={startTimer}
+          <Button disabled={timerActive} onClick={captureFullShot}
             style={{ width: "100%", backgroundColor: timerActive ? "#555" : "#1a9fff" }}>
             <FaCamera style={{ marginRight: "8px" }} />
             {timerActive ? "Знімаю..." : "Зробити знімок"}
           </Button>
         </PanelSectionRow>
-        <PreviewBox imgData={imgData} errorMsg={errorMsg} />
+
+        {errorMsg && (
+          <PanelSectionRow>
+            <div style={{ color: "#e74c3c", fontSize: "11px", textAlign: "center", width: "100%" }}>{errorMsg}</div>
+          </PanelSectionRow>
+        )}
+
+        <PanelSectionRow>
+          <Button onClick={async () => { await saveZone(); }}
+            style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
+            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
+          </Button>
+        </PanelSectionRow>
       </PanelSection>
     );
   }
@@ -452,83 +572,53 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
             {timerActive ? "Знімаю..." : "Зробити знімок"}
           </Button>
         </PanelSectionRow>
-        <PreviewBox imgData={imgData} errorMsg={errorMsg} />
+        <PreviewBox imgData={imgData} errorMsg={errorMsg} sticky />
 
-        {/* Секція 1 — Базові фільтри */}
-        <SecHeader title="Базові фільтри" expanded={secBasic} onToggle={() => setSecBasic(!secBasic)} />
-        {secBasic && (<>
-          <PanelSectionRow>
-            <div style={{ width: "100%", boxSizing: "border-box" }}>
-              <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "4px" }}>Колір тексту субтитрів:</div>
-              <div style={{ display: "flex", gap: "3px" }}>
-                {colorButtons.map(c => (
-                  <button key={c} onClick={() => { setColorFilter(c); fetchFilteredPreview(); }} style={{
-                    flex: 1, height: "26px", borderRadius: "4px",
-                    border: colorFilter === c ? "2px solid #fff" : "2px solid transparent",
-                    backgroundColor: colorStyles[c], cursor: "pointer", padding: 0,
-                    color: "#fff", fontSize: "10px", fontWeight: "bold",
-                  }}>{c === "none" ? "✕" : c}</button>
-                ))}
-              </div>
+        {/* Колір тексту */}
+        <PanelSectionRow>
+          <div style={{ width: "100%", boxSizing: "border-box" }}>
+            <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "4px" }}>Колір тексту субтитрів:</div>
+            <div style={{ display: "flex", gap: "3px" }}>
+              {colorButtons.map(c => (
+                <button key={c} onClick={() => { setColorFilter(c); fetchFilteredPreview(); }} style={{
+                  flex: 1, height: "26px", borderRadius: "4px",
+                  border: colorFilter === c ? "2px solid #fff" : "2px solid transparent",
+                  backgroundColor: colorStyles[c], cursor: "pointer", padding: 0,
+                  color: "#fff", fontSize: "10px", fontWeight: "bold",
+                }}>{c === "none" ? "✕" : c}</button>
+              ))}
             </div>
-          </PanelSectionRow>
-          {colorFilter !== "none" && (
-            <PanelSectionRow>
-              <SliderField label={`Жорсткість: ${hardness}`} value={hardness}
-                min={5} max={120} step={5}
-                onChange={(v: number) => { setHardness(v); fetchFilteredPreview(); }} />
-            </PanelSectionRow>
-          )}
-          {colorFilter === "none" && (
-            <PanelSectionRow>
-              <ToggleField label="Чорно-білий режим" checked={bw} onChange={(v: boolean) => { setBw(v); fetchFilteredPreview(); }} />
-            </PanelSectionRow>
-          )}
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <SliderField label={`Мін висота тексту: ${minXheight}px`} value={minXheight}
+            min={5} max={50} step={1}
+            onChange={(v: number) => setMinXheight(v)} />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField label="Обводка (пошук букв)" checked={outlineFilter} onChange={(v: boolean) => { setOutlineFilter(v); fetchFilteredPreview(); }} />
+        </PanelSectionRow>
+        {outlineFilter && (<>
           <PanelSectionRow>
-            <SliderField label={`Контраст: ${(contrast / 10).toFixed(1)}x`} value={contrast}
-              min={1} max={30} step={1}
-              onChange={(v: number) => { setContrast(v); fetchFilteredPreview(); }} />
+            <SliderField label={`Поріг мін: ${outlineHmin}`} value={outlineHmin}
+              min={0} max={255} step={5}
+              onChange={(v: number) => { setOutlineHmin(v); fetchFilteredPreview(); }} />
           </PanelSectionRow>
           <PanelSectionRow>
-            <SliderField label={`Яскравість: ${(brightness / 10).toFixed(1)}x`} value={brightness}
-              min={1} max={30} step={1}
-              onChange={(v: number) => { setBrightness(v); fetchFilteredPreview(); }} />
+            <SliderField label={`Поріг макс: ${outlineHmax}`} value={outlineHmax}
+              min={0} max={255} step={5}
+              onChange={(v: number) => { setOutlineHmax(v); fetchFilteredPreview(); }} />
           </PanelSectionRow>
           <PanelSectionRow>
-            <SliderField label={`Мін висота тексту: ${minXheight}px`} value={minXheight}
-              min={5} max={50} step={1}
-              onChange={(v: number) => setMinXheight(v)} />
+            <SliderField label={`Радіус обводки: ${outlineRadius}px`} value={outlineRadius}
+              min={1} max={15} step={1}
+              onChange={(v: number) => { setOutlineRadius(v); fetchFilteredPreview(); }} />
           </PanelSectionRow>
-        </>)}
-
-        {/* Секція 2 — Контекстний фільтр */}
-        <SecHeader title="Обводка (пошук букв)" expanded={secOutline} onToggle={() => setSecOutline(!secOutline)} />
-        {secOutline && (<>
           <PanelSectionRow>
-            <ToggleField label="Увімкнути" checked={outlineFilter} onChange={(v: boolean) => { setOutlineFilter(v); fetchFilteredPreview(); }} />
+            <SliderField label={`Поріг темного: ${outlineDark}`} value={outlineDark}
+              min={0} max={128} step={5}
+              onChange={(v: number) => { setOutlineDark(v); fetchFilteredPreview(); }} />
           </PanelSectionRow>
-          {outlineFilter && (<>
-            <PanelSectionRow>
-              <SliderField label={`Поріг мін: ${outlineHmin}`} value={outlineHmin}
-                min={0} max={255} step={5}
-                onChange={(v: number) => { setOutlineHmin(v); fetchFilteredPreview(); }} />
-            </PanelSectionRow>
-            <PanelSectionRow>
-              <SliderField label={`Поріг макс: ${outlineHmax}`} value={outlineHmax}
-                min={0} max={255} step={5}
-                onChange={(v: number) => { setOutlineHmax(v); fetchFilteredPreview(); }} />
-            </PanelSectionRow>
-            <PanelSectionRow>
-              <SliderField label={`Радіус обводки: ${outlineRadius}px`} value={outlineRadius}
-                min={1} max={15} step={1}
-                onChange={(v: number) => { setOutlineRadius(v); fetchFilteredPreview(); }} />
-            </PanelSectionRow>
-            <PanelSectionRow>
-              <SliderField label={`Поріг темного: ${outlineDark}`} value={outlineDark}
-                min={0} max={128} step={5}
-                onChange={(v: number) => { setOutlineDark(v); fetchFilteredPreview(); }} />
-            </PanelSectionRow>
-          </>)}
         </>)}
 
         {/* Зберегти */}
@@ -903,11 +993,206 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
     transition: "background 0.1s, border-color 0.1s",
   });
 
+  // ===== МЕНЮ ШІ =====
+  if (activeMenu === "ai") {
+    return (
+      <PanelSection title="🤖 ШІ перекладач"><style>{globalStyle}</style>
+        <PanelSectionRow>
+          <Button onClick={() => setActiveMenu("main")} style={{ width: "100%", backgroundColor: "#3d4450" }}>
+            ← Назад
+          </Button>
+        </PanelSectionRow>
+
+        {/* Увімкнути ШІ */}
+        <PanelSectionRow>
+          <ToggleField
+            label="🤖 Увімкнути ШІ режим"
+            checked={aiEnabled}
+            onChange={(v: boolean) => setAiEnabled(v)}
+          />
+        </PanelSectionRow>
+
+        {aiEnabled && (
+          <PanelSectionRow>
+            <div style={{ color: "#f0a500", fontSize: "10px", padding: "4px 0" }}>
+              ⚡ ШІ очищує OCR сміття і виправляє артефакти
+            </div>
+          </PanelSectionRow>
+        )}
+
+        {/* Мова субтитрів */}
+        <PanelSectionRow>
+          <div style={{ width: "100%" }}>
+            <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "6px" }}>Мова субтитрів в грі:</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+              {[
+                { v: "uk", l: "🇺🇦 Українська" },
+                { v: "en", l: "🇬🇧 Англійська" },
+              ].map(({ v, l }) => (
+                <button key={v} onClick={() => setAiLang(v)} style={{
+                  padding: "8px 4px", borderRadius: "4px",
+                  border: aiLang === v ? "2px solid #1a9fff" : "2px solid transparent",
+                  backgroundColor: aiLang === v ? "#1a3a5a" : "#2a3140",
+                  color: "#fff", fontSize: "11px", cursor: "pointer",
+                }}>{l}</button>
+              ))}
+            </div>
+          </div>
+        </PanelSectionRow>
+
+        {/* Переклад (тільки якщо EN) */}
+        {aiLang === "en" && (
+          <PanelSectionRow>
+            <ToggleField
+              label="🌐 Перекладати на українську"
+              checked={aiTranslate}
+              onChange={(v: boolean) => setAiTranslate(v)}
+            />
+          </PanelSectionRow>
+        )}
+
+        {/* Модель */}
+        <PanelSectionRow>
+          <div style={{ width: "100%" }}>
+            <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "6px" }}>Модель Groq:</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+              {[
+                { v: "llama-3.1-8b-instant", l: "8B ⚡ швидка" },
+                { v: "llama-3.3-70b-versatile", l: "70B 🎯 точна" },
+              ].map(({ v, l }) => (
+                <button key={v} onClick={() => setAiModel(v)} style={{
+                  padding: "8px 4px", borderRadius: "4px",
+                  border: aiModel === v ? "2px solid #1a9fff" : "2px solid transparent",
+                  backgroundColor: aiModel === v ? "#1a3a5a" : "#2a3140",
+                  color: "#fff", fontSize: "11px", cursor: "pointer",
+                }}>{l}</button>
+              ))}
+            </div>
+          </div>
+        </PanelSectionRow>
+
+        {/* API ключ */}
+        <PanelSectionRow>
+          <div style={{ width: "100%" }}>
+            <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "4px" }}>Groq API ключ:</div>
+            <input
+              type="password"
+              value={aiApiKey}
+              onChange={(e: any) => setAiApiKey(e.target.value)}
+              placeholder="gsk_..."
+              style={{
+                width: "100%", padding: "6px 8px", borderRadius: "4px",
+                background: "#1a2030", border: "1px solid #444",
+                color: "#fff", fontSize: "11px", boxSizing: "border-box"
+              }}
+            />
+            <div style={{ color: "#555", fontSize: "9px", marginTop: "2px" }}>
+              console.groq.com → API Keys → Create Key
+            </div>
+          </div>
+        </PanelSectionRow>
+
+        {/* Статус Groq */}
+        <PanelSectionRow>
+          <div style={{ width: "100%" }}>
+            <div style={{ color: "#8b929a", fontSize: "11px", marginBottom: "4px" }}>
+              Статус Groq:
+            </div>
+            <div style={{
+              padding: "6px 8px", borderRadius: "4px",
+              background: "#1a2030", border: "1px solid #333",
+              color: aiStatus.startsWith("✅") ? "#27ae60" : aiStatus.startsWith("❌") ? "#e74c3c" : "#8b929a",
+              fontSize: "11px", display: "flex", justifyContent: "space-between"
+            }}>
+              <span>{aiStatus}</span>
+              {aiStatusTime && <span style={{ color: "#555" }}>{aiStatusTime}</span>}
+            </div>
+            <button onClick={async () => {
+              const r = await serverApi.callPluginMethod("get_groq_status", {});
+              if (r.success) {
+                setAiStatus(r.result.status || "—");
+                setAiStatusTime(r.result.time || "");
+              }
+            }} style={{
+              marginTop: "4px", width: "100%", padding: "4px",
+              background: "#2a3140", border: "none", borderRadius: "4px",
+              color: "#8b929a", fontSize: "10px", cursor: "pointer"
+            }}>🔄 Оновити статус</button>
+          </div>
+        </PanelSectionRow>
+
+        {/* Тест */}
+        <PanelSectionRow>
+          <Button
+            disabled={aiTesting}
+            onClick={async () => {
+              setAiTesting(true);
+              setAiTestResult(null);
+              // Зберігаємо ключ тільки якщо він не маскований
+              if (aiApiKey && !aiApiKey.includes("*")) {
+                await serverApi.callPluginMethod("save_api_key", { service: "groq", key: aiApiKey });
+              }
+              // Тест перекладу
+              const testText = aiLang === "en" ? "Get down! They're everywhere!" : "Мерфі, є проблема.";
+              const res = await serverApi.callPluginMethod("test_ai_translate", { text: testText });
+              if (res.success && res.result.success) {
+                setAiTestResult(`✅ ${res.result.result}`);
+              } else {
+                setAiTestResult(`❌ ${res.result?.error || "Помилка"}`);
+              }
+              setAiTesting(false);
+            }}
+            style={{ width: "100%", backgroundColor: aiTesting ? "#555" : "#1a6fa8" }}>
+            {aiTesting ? "Тестую..." : "🧪 Тест API"}
+          </Button>
+        </PanelSectionRow>
+
+        {aiTestResult && (
+          <PanelSectionRow>
+            <div style={{
+              width: "100%", padding: "6px 8px", borderRadius: "4px",
+              background: "#1a2030", border: "1px solid #333",
+              color: aiTestResult.startsWith("✅") ? "#27ae60" : "#e74c3c",
+              fontSize: "11px"
+            }}>
+              {aiTestResult}
+            </div>
+          </PanelSectionRow>
+        )}
+
+        {/* Зберегти */}
+        <PanelSectionRow>
+          <Button onClick={async () => {
+            await serverApi.callPluginMethod("save_ai_settings", {
+              ai_enabled: aiEnabled,
+              ai_lang: aiLang,
+              ai_translate: aiTranslate,
+              ai_model: aiModel,
+            });
+            // Зберігаємо ключ тільки якщо він не маскований
+            if (aiApiKey && !aiApiKey.includes("*")) {
+              await serverApi.callPluginMethod("save_api_key", { service: "groq", key: aiApiKey });
+            }
+          }} style={{ width: "100%", backgroundColor: currentGame.name ? "#27ae60" : "#555" }}>
+            💾 {currentGame.name ? currentGame.name : "Гра не запущена"}
+          </Button>
+        </PanelSectionRow>
+
+        {!currentGame.name && (
+          <PanelSectionRow>
+            <div style={{ color: "#e74c3c", fontSize: "10px", textAlign: "center" }}>
+              ⚠️ Запустіть гру щоб зберегти налаштування
+            </div>
+          </PanelSectionRow>
+        )}
+
+      </PanelSection>
+    );
+  }
+
   return (
     <PanelSection title="UA Voice Bridge">
       <style>{globalStyle}</style>
-
-      {/* Поточна гра */}
       <PanelSectionRow>
         <div style={{
           width: "100%", background: "#1a2030",
@@ -962,6 +1247,13 @@ const Content: FC<{ serverApi: any }> = ({ serverApi }) => {
           onFocus={() => setFocusedBtn("tts")} onBlur={() => setFocusedBtn(null)}
           style={btnStyle("tts")}>
           <FaVolumeUp style={{ marginRight: "8px" }} /> Синтез мови
+        </Button>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <Button onClick={() => setActiveMenu("ai")}
+          onFocus={() => setFocusedBtn("ai")} onBlur={() => setFocusedBtn(null)}
+          style={btnStyle("ai")}>
+          🤖 ШІ перекладач
         </Button>
       </PanelSectionRow>
 

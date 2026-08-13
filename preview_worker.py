@@ -82,6 +82,21 @@ if __name__ == "__main__":
     img_path = sys.argv[1]
     cfg = json.loads(sys.argv[2])
     img = Image.open(img_path)
+    # Якщо переданий crop — обрізаємо повний кадр по зоні субтитрів
+    crop = cfg.get("_crop")
+    if crop:
+        w, h = img.size
+        left = crop.get("left", 0)
+        top = crop.get("top", 0)
+        right = w - crop.get("right", 0)
+        bottom = h - crop.get("bottom", 0)
+        if right > left and bottom > top:
+            img = img.crop((left, top, right, bottom))
+    # Якщо треба зберегти обрізаний файл (для OCR) — зберігаємо і виходимо
+    save_to = cfg.get("_save_to")
+    if save_to:
+        img.save(save_to)
+        sys.exit(0)
     img = apply_filters(img, cfg)
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="JPEG", quality=80)
