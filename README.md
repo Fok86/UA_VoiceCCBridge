@@ -6,7 +6,7 @@
 
 **Плагін для Steam Deck який озвучує субтитри українською мовою**
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue?style=for-the-badge)](https://github.com/Fok86/UA_VoiceCCBridge/releases/latest)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue?style=for-the-badge)](https://github.com/Fok86/UA_VoiceCCBridge/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Steam%20Deck-1a9fff?style=for-the-badge&logo=steam)](https://store.steampowered.com/steamdeck)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 [![Decky](https://img.shields.io/badge/Decky%20Loader-required-orange?style=for-the-badge)](https://github.com/SteamDeckHomebrew/decky-loader)
@@ -142,7 +142,7 @@ sudo systemctl restart plugin_loader
 | OCR | [Tesseract 5](https://github.com/tesseract-ocr/tesseract) + [tesserocr](https://github.com/sirfz/tesserocr) |
 | TTS (Piper) | [Piper](https://github.com/rhasspy/piper) + [ukrainian-tts](https://github.com/robinhad/ukrainian-tts) |
 | TTS (RHVoice) | [RHVoice](https://github.com/RHVoice/RHVoice) |
-| ШІ-переклад | [Groq](https://groq.com) (Llama 3.1 / 3.3) |
+| ШІ-переклад | [Groq](https://groq.com) (OpenAI gpt-oss) |
 | EQ | SoX — Sound eXchange |
 | Знімок | GStreamer + PipeWire |
 | Задні кнопки | hidraw (протокол контролера Valve) |

@@ -19,6 +19,8 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 PROFILES_DIR = os.path.join(CONFIG_DIR, "profiles")
 API_KEYS_PATH = os.path.join(CONFIG_DIR, "api_keys.json")
 API_KEY_TXT = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "api_key.txt")
+_BUNDLED_PY = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "python", "bin", "python3.13")
+PYTHON_BIN = _BUNDLED_PY if os.path.exists(_BUNDLED_PY) else "python3"
 SCREEN_W = 1280
 SCREEN_H = 800
 
@@ -70,7 +72,7 @@ def load_config(appid=None):
         "tts_noise_scale": 0.667, "tts_noise_w": 0.8,
         "gender_detect": False, "tts_speaker_male": 5, "tts_speaker_female": 7,
         "ai_enabled": False, "ai_lang": "uk", "ai_translate": False,
-        "ai_model": "llama-3.1-8b-instant",
+        "ai_model": "openai/gpt-oss-20b",
     }
     # Профіль гри (якщо є) — НЕ глобальний конфіг!
     if appid:
@@ -146,7 +148,7 @@ async def run_python3(script: str, *args) -> str:
     plugin_dir = decky_plugin.DECKY_PLUGIN_DIR
     script_path = os.path.join(plugin_dir, script)
     proc = await asyncio.create_subprocess_exec(
-        "python3", script_path, *args,
+        PYTHON_BIN, script_path, *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -286,7 +288,7 @@ class Plugin:
                 return {"success": False, "error": "Groq API ключ не знайдено"}
             appid, _ = get_running_game()
             cfg = load_config(appid)
-            result = await run_python3("groq_translate.py", groq_key, cfg.get("ai_model", "llama-3.1-8b-instant"), text)
+            result = await run_python3("groq_translate.py", groq_key, cfg.get("ai_model", "openai/gpt-oss-20b"), text)
             return {"success": True, "result": result}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -473,7 +475,7 @@ class Plugin:
                 "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
             }
             subprocess.Popen(
-                ["python3", script],
+                [PYTHON_BIN, script],
                 env=clean_env,
                 stdout=open("/tmp/ua_worker.log", "w"),
                 stderr=subprocess.STDOUT,
@@ -506,7 +508,7 @@ class Plugin:
             watcher = os.path.join(decky_plugin.DECKY_PLUGIN_DIR, "button_watcher.py")
             logf = open("/tmp/ua_watcher.log", "w")
             self._btn_proc = subprocess.Popen(
-                ["python3", watcher],
+                [PYTHON_BIN, watcher],
                 stdout=logf, stderr=subprocess.STDOUT
             )
             decky_plugin.logger.info(f"UA_LOG: button_watcher запущено pid={self._btn_proc.pid}")

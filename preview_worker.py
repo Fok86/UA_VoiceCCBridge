@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 import sys, os, json, base64, io
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "bin"))
+
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(PLUGIN_DIR, "bin"))
+sys.path.insert(0, PLUGIN_DIR)
+# Нативні бібліотеки PIL (libjpeg/libz тощо) лежать поруч з tesserocr —
+# без цього PIL._imaging не імпортується після оновлення SteamOS
+_tess_libs = os.path.join(PLUGIN_DIR, "bin", "tesserocr.libs")
+if os.path.exists(_tess_libs):
+    os.environ["LD_LIBRARY_PATH"] = _tess_libs + ":" + os.environ.get("LD_LIBRARY_PATH", "")
+
 from PIL import Image, ImageEnhance
 import numpy as np
 

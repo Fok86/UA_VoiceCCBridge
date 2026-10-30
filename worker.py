@@ -29,6 +29,8 @@ from en_filter import filter_text_en
 CONFIG_PATH   = "/home/deck/.config/ua_voice_plugin/config.json"
 API_KEYS_PATH = "/home/deck/.config/ua_voice_plugin/api_keys.json"
 API_KEY_TXT = os.path.join(PLUGIN_DIR, "api_key.txt")
+PYTHON_BIN = os.path.join(PLUGIN_DIR, "python", "bin", "python3.13")
+if not os.path.exists(PYTHON_BIN): PYTHON_BIN = "python3"
 TESSDATA    = os.path.join(PLUGIN_DIR, "tessdata/")
 PIPER_DIR   = os.path.join(PLUGIN_DIR, "piper")
 PIPER_BIN   = os.path.join(PIPER_DIR, "piper")
@@ -76,7 +78,7 @@ def load_config():
         "tts_malloc_arena": False, "tts_malloc_mmap": False,
         "gender_detect": False, "tts_speaker_male": 5, "tts_speaker_female": 7,
         "ai_enabled": False, "ai_lang": "uk", "ai_translate": False,
-        "ai_model": "llama-3.1-8b-instant",
+        "ai_model": "openai/gpt-oss-20b",
     }
     try:
         with open(CONFIG_PATH) as f:
@@ -264,7 +266,7 @@ def groq_process(text: str, cfg: dict) -> str:
         if not api_key:
             _save_groq_status("❌ API ключ не знайдено")
             return text  # fallback — повертаємо оригінал
-        model = cfg.get("ai_model", "llama-3.1-8b-instant")
+        model = cfg.get("ai_model", "openai/gpt-oss-20b")
         lang = cfg.get("ai_lang", "uk")
         translate = str(cfg.get("ai_translate", False)).lower()
         groq_script = os.path.join(PLUGIN_DIR, "groq_translate.py")
@@ -272,7 +274,7 @@ def groq_process(text: str, cfg: dict) -> str:
         env["PYTHONIOENCODING"] = "utf-8"
         env["LANG"] = "en_US.UTF-8"
         result = subprocess.run(
-            ["python3", groq_script, api_key, model, lang, translate, text],
+            [PYTHON_BIN, groq_script, api_key, model, lang, translate, text],
             capture_output=True, text=True, timeout=5,
             encoding="utf-8", env=env
         )
@@ -538,21 +540,25 @@ def main():
         # Оновлюємо last_text одразу після decide (EN оригінал)
         last_text = new_text_for_decide if (ai_enabled and ai_lang == "en") else new_text
 
-        # 5. ШІ обробка — ТІЛЬКИ для нових фраз після decide
-        if ai_enabled and new_text and len(new_text) >= 5:
+        # speak_text = результат decide (у typewriter це ТІЛЬКИ нова частина).
+        # Його і озвучуємо. У AI-режимі перекладаємо цю частину через Groq.
+        text_to_voice = speak_text
+
+        # 5. ШІ обробка — перекладаємо саме нову частину (speak_text)
+        if ai_enabled and text_to_voice and len(text_to_voice) >= 5:
             t_ai = time.monotonic()
-            groq_result = groq_process(new_text, cfg)
+            groq_result = groq_process(text_to_voice, cfg)
             t_ai_ms = (time.monotonic() - t_ai) * 1000
             if groq_result and not any(b in groq_result.lower() for b in GROQ_BAD_RESPONSES):
-                new_text = groq_result
-                print(f"AI: {t_ai_ms:.0f}мс → \"{new_text}\"", flush=True)
+                text_to_voice = groq_result
+                print(f"AI: {t_ai_ms:.0f}мс → \"{text_to_voice}\"", flush=True)
             else:
                 print(f"AI: {t_ai_ms:.0f}мс → (відкинуто)", flush=True)
-        
+
         # 6. TTS
         t_tts = time.monotonic()
         if True:  # speak_text вже перевірено вище
-            tts_text = trim_incomplete_word(new_text)
+            tts_text = trim_incomplete_word(text_to_voice)
             if tts_text:
                 tts_cfg = cfg
                 # Гендер-детекція: підміна голосу за тегом [F]/[M]

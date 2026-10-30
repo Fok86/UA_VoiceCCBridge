@@ -232,7 +232,7 @@ var plugin_export = (function () {
         const [aiEnabled, setAiEnabled] = SP_REACT.useState(false);
         const [aiLang, setAiLang] = SP_REACT.useState("uk");
         const [aiTranslate, setAiTranslate] = SP_REACT.useState(false);
-        const [aiModel, setAiModel] = SP_REACT.useState("llama-3.1-8b-instant");
+        const [aiModel, setAiModel] = SP_REACT.useState("openai/gpt-oss-20b");
         const [aiApiKey, setAiApiKey] = SP_REACT.useState("");
         const [aiTestResult, setAiTestResult] = SP_REACT.useState(null);
         const [aiTesting, setAiTesting] = SP_REACT.useState(false);
@@ -419,7 +419,7 @@ var plugin_export = (function () {
                 setAiEnabled(z.ai_enabled ?? false);
                 setAiLang(z.ai_lang ?? "uk");
                 setAiTranslate(z.ai_translate ?? false);
-                setAiModel(z.ai_model ?? "llama-3.1-8b-instant");
+                setAiModel(z.ai_model ?? "openai/gpt-oss-20b");
             }
             // Завантажуємо маскований ключ
             const keyRes = await serverApi.callPluginMethod("get_api_keys", {});
@@ -823,8 +823,8 @@ var plugin_export = (function () {
                     SP_REACT.createElement("div", { style: { width: "100%" } },
                         SP_REACT.createElement("div", { style: { color: "#8b929a", fontSize: "11px", marginBottom: "6px" } }, "\u041C\u043E\u0434\u0435\u043B\u044C Groq:"),
                         SP_REACT.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" } }, [
-                            { v: "llama-3.1-8b-instant", l: "8B ⚡ швидка" },
-                            { v: "llama-3.3-70b-versatile", l: "70B 🎯 точна" },
+                            { v: "openai/gpt-oss-20b", l: "20B ⚡ швидка" },
+                            { v: "openai/gpt-oss-120b", l: "120B 🎯 точна" },
                         ].map(({ v, l }) => (SP_REACT.createElement("button", { key: v, onClick: () => setAiModel(v), style: {
                                 padding: "8px 4px", borderRadius: "4px",
                                 border: aiModel === v ? "2px solid #1a9fff" : "2px solid transparent",
